@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zenoh-derive","crates/zenoh-nostd", "crates/zenoh-proto"]
+members = ["crates/zenoh-derive","crates/zenoh-nostd", "crates/zenoh-proto", "crates/zenoh-sansio"]
 exclude = ["platforms/zenoh-std", "platforms/zenoh-embassy"]
 
 [workspace.package]
@@ -59,7 +59,7 @@ version.workspace = true
 readme.workspace = true
 
 [features]
-default = []
+default = ["std", "log"]
 
 log = ["zenoh-nostd/log"]
 defmt = ["zenoh-nostd/defmt"]

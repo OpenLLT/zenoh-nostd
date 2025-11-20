@@ -74,7 +74,7 @@ impl<'a> RecvInitAckOut<'a> {
         let mut batch = TransportBatch::new(&mut reader);
         let init_ack = loop {
             match batch.next() {
-                Some(TransportBody::InitAck(i)) => break i,
+                Some(Ok(TransportBody::InitAck(i))) => break i,
                 Some(_) => continue,
                 None => zbail!(ZTransportError::InvalidRx),
             }
@@ -170,7 +170,7 @@ impl RecvOpenAckOut {
         let mut batch = TransportBatch::new(&mut reader);
         let open_ack = loop {
             match batch.next() {
-                Some(TransportBody::OpenAck(o)) => break o,
+                Some(Ok(TransportBody::OpenAck(o))) => break o,
                 Some(_) => continue,
                 None => zbail!(ZTransportError::InvalidRx),
             }

@@ -1,5 +1,5 @@
 use crate::{
-    ZExt, ZReader, ZReaderExt,
+    ZCodecResult, ZExt, ZReader, ZReaderExt,
     network::NetworkBatch,
     transport::{
         close::Close,
@@ -36,17 +36,17 @@ pub enum TransportBody<'a, 'b> {
     Frame(Frame<'a, 'b>),
 }
 
-pub struct TransportBatch<'a, 'b> {
-    reader: &'b mut ZReader<'a>,
+pub struct TransportBatch<'a> {
+    reader: ZReader<'a>,
 }
 
-impl<'a, 'b> TransportBatch<'a, 'b> {
-    pub fn new(reader: &'b mut ZReader<'a>) -> TransportBatch<'a, 'b> {
+impl<'a> TransportBatch<'a> {
+    pub fn new(reader: ZReader<'a>) -> TransportBatch<'a> {
         TransportBatch { reader }
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<TransportBody<'a, '_>> {
+    pub fn next(&mut self) -> Option<ZCodecResult<TransportBody<'a, '_>>> {
         if !self.reader.can_read() {
             return None;
         }
@@ -58,19 +58,18 @@ impl<'a, 'b> TransportBatch<'a, 'b> {
             .expect("reader should not be empty at this stage");
 
         macro_rules! decode {
-            ($ty:ty) => {{
-                match <$ty as $crate::ZBodyDecode>::z_body_decode(self.reader, header) {
+            ($ty:ty) => {
+                match <$ty as $crate::ZBodyDecode>::z_body_decode(&mut self.reader, header) {
                     Ok(msg) => msg,
-                    Err(_) => {
-                        self.reader.rewind(mark);
-                        return None;
+                    Err(err) => {
+                        return Some(Err(err));
                     }
                 }
-            }};
+            };
         }
 
         let ack = header & 0b0010_0000 != 0;
-        Some(match header & 0b0001_1111 {
+        let body = match header & 0b0001_1111 {
             InitAck::ID if ack => TransportBody::InitAck(decode!(InitAck)),
             InitSyn::ID => TransportBody::InitSyn(decode!(InitSyn)),
             OpenAck::ID if ack => TransportBody::OpenAck(decode!(OpenAck)),
@@ -79,7 +78,7 @@ impl<'a, 'b> TransportBatch<'a, 'b> {
             KeepAlive::ID => TransportBody::KeepAlive(decode!(KeepAlive)),
             Frame::ID => {
                 let frame = decode!(FrameHeader);
-                let iter = NetworkBatch::new(self.reader);
+                let iter = NetworkBatch::new(&mut self.reader);
                 TransportBody::Frame(Frame {
                     header: frame,
                     msgs: iter,
@@ -89,7 +88,9 @@ impl<'a, 'b> TransportBatch<'a, 'b> {
                 self.reader.rewind(mark);
                 return None;
             }
-        })
+        };
+
+        Some(Ok(body))
     }
 }
 
