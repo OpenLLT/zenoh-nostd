@@ -1,36 +1,43 @@
-use core::str::FromStr;
+//! Query and HeaplessQuery types
 
+use core::convert::TryFrom;
 use heapless::{String, Vec};
+use higher_kinded_types::ForLt;
 use zenoh_proto::{
-    Encoding, WireExpr, ZResult, keyexpr,
-    network::{
-        NetworkBody, QoS,
-        response::{Response, ResponseFinal},
-    },
-    zenoh::{ConsolidationMode, PushBody, ResponseBody, err::Err, put::Put, reply::Reply},
+    fields::{ConsolidationMode, WireExpr},
+    keyexpr,
+    msgs::{Err, PushBody, Put, Reply, Response, ResponseBody, ResponseFinal},
 };
 
-use crate::{SessionDriver, platform::Platform};
+use crate::api::{ZConfig, driver::Driver};
 
-pub struct ZQuery<'a, T: Platform + 'static> {
+pub(crate) type QueryRef<Config> = ForLt!(<'a> = &'a Query<'a, Config>);
+
+pub struct Query<'a, Config>
+where
+    Config: ZConfig,
+{
+    driver: &'static Driver<'static, Config>,
     rid: u32,
-    driver: &'static SessionDriver<T>,
     keyexpr: &'a keyexpr,
     parameters: Option<&'a str>,
     payload: Option<&'a [u8]>,
 }
 
-impl<'a, T: Platform + 'static> ZQuery<'a, T> {
-    pub(crate) fn new(
+impl<'a, Config> Query<'a, Config>
+where
+    Config: ZConfig,
+{
+    pub fn new(
+        driver: &'static Driver<'static, Config>,
         rid: u32,
-        driver: &'static SessionDriver<T>,
         keyexpr: &'a keyexpr,
         parameters: Option<&'a str>,
         payload: Option<&'a [u8]>,
     ) -> Self {
         Self {
-            rid,
             driver,
+            rid,
             keyexpr,
             parameters,
             payload,
@@ -49,75 +56,114 @@ impl<'a, T: Platform + 'static> ZQuery<'a, T> {
         self.payload
     }
 
-    pub(crate) fn into_owned<
-        const MAX_KEYEXPR: usize,
-        const MAX_PARAMETERS: usize,
-        const MAX_PAYLOAD: usize,
-    >(
-        self,
-    ) -> ZResult<ZOwnedQuery<T, MAX_KEYEXPR, MAX_PARAMETERS, MAX_PAYLOAD>> {
-        Ok(ZOwnedQuery::new(
-            self.rid,
-            self.driver,
-            String::from_str(self.keyexpr.as_str())
-                .map_err(|_| zenoh_proto::ZError::CapacityExceeded)?,
-            match self.parameters {
-                Some(params) => Some(
-                    String::from_str(params).map_err(|_| zenoh_proto::ZError::CapacityExceeded)?,
-                ),
-                None => None,
-            },
-            match self.payload {
-                Some(payload) => {
-                    let mut vec: Vec<u8, MAX_PAYLOAD> = Vec::new();
-                    vec.extend_from_slice(payload)
-                        .map_err(|_| zenoh_proto::ZError::CapacityExceeded)?;
-                    Some(vec)
-                }
-                None => None,
-            },
-        ))
+    pub async fn reply(&self, ke: &keyexpr, payload: &[u8]) -> crate::ZResult<()> {
+        let wke = WireExpr::from(ke);
+
+        let response = Response {
+            rid: self.rid,
+            wire_expr: wke,
+            payload: ResponseBody::Reply(Reply {
+                consolidation: ConsolidationMode::None,
+                payload: PushBody::Put(Put {
+                    payload,
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        };
+
+        self.driver.send(response).await
+    }
+
+    pub async fn err(&self, ke: &keyexpr, payload: &[u8]) -> crate::ZResult<()> {
+        let wke = WireExpr::from(ke);
+
+        let response = Response {
+            rid: self.rid,
+            wire_expr: wke,
+            payload: ResponseBody::Err(Err {
+                payload,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        self.driver.send(response).await
+    }
+
+    pub async fn finalize(&self) -> crate::ZResult<()> {
+        let response = ResponseFinal {
+            rid: self.rid,
+            ..Default::default()
+        };
+
+        self.driver.send(response).await
     }
 }
 
-pub struct ZOwnedQuery<
-    T: Platform + 'static,
+pub struct HeaplessQuery<
     const MAX_KEYEXPR: usize,
     const MAX_PARAMETERS: usize,
     const MAX_PAYLOAD: usize,
-> {
+    Config,
+> where
+    Config: ZConfig,
+{
+    driver: &'static Driver<'static, Config>,
     rid: u32,
-    driver: &'static SessionDriver<T>,
-    payload: Option<Vec<u8, MAX_PAYLOAD>>,
-    parameters: Option<String<MAX_PARAMETERS>>,
     keyexpr: String<MAX_KEYEXPR>,
+    parameters: Option<String<MAX_PARAMETERS>>,
+    payload: Option<Vec<u8, MAX_PAYLOAD>>,
 }
 
-impl<
-    T: Platform + 'static,
-    const MAX_KEYEXPR: usize,
-    const MAX_PARAMETERS: usize,
-    const MAX_PAYLOAD: usize,
-> ZOwnedQuery<T, MAX_KEYEXPR, MAX_PARAMETERS, MAX_PAYLOAD>
+impl<const MAX_KEYEXPR: usize, const MAX_PARAMETERS: usize, const MAX_PAYLOAD: usize, Config>
+    HeaplessQuery<MAX_KEYEXPR, MAX_PARAMETERS, MAX_PAYLOAD, Config>
+where
+    Config: ZConfig,
 {
-    pub(crate) fn new(
+    pub fn new(
+        driver: &'static Driver<'static, Config>,
         rid: u32,
-        driver: &'static SessionDriver<T>,
-        keyexpr: String<MAX_KEYEXPR>,
-        parameters: Option<String<MAX_PARAMETERS>>,
-        payload: Option<Vec<u8, MAX_PAYLOAD>>,
-    ) -> Self {
-        Self {
-            rid,
+        keyexpr: &keyexpr,
+        parameters: Option<&str>,
+        payload: Option<&[u8]>,
+    ) -> Result<Self, crate::CollectionError> {
+        let mut ke_str = String::<MAX_KEYEXPR>::new();
+        ke_str
+            .push_str(keyexpr.as_str())
+            .map_err(|_| crate::CollectionError::CollectionIsFull)?;
+
+        let parameters = if let Some(p) = parameters {
+            let mut p_str = String::<MAX_PARAMETERS>::new();
+            p_str
+                .push_str(p)
+                .map_err(|_| crate::CollectionError::CollectionIsFull)?;
+            Some(p_str)
+        } else {
+            None
+        };
+
+        let payload = if let Some(bytes) = payload {
+            let mut p = Vec::<u8, MAX_PAYLOAD>::new();
+            p.extend_from_slice(bytes)
+                .map_err(|_| crate::CollectionError::CollectionIsFull)?;
+            Some(p)
+        } else {
+            None
+        };
+
+        Ok(Self {
             driver,
-            keyexpr,
+            rid,
+            keyexpr: ke_str,
             parameters,
             payload,
-        }
+        })
     }
 
+    /// Reconstructs a valid `keyexpr` via unsafe `keyexpr::new()`.
     pub fn keyexpr(&self) -> &keyexpr {
-        keyexpr::from_str_unchecked(self.keyexpr.as_str())
+        unsafe { keyexpr::new(self.keyexpr.as_str()).unwrap_unchecked() }
     }
 
     pub fn parameters(&self) -> Option<&str> {
@@ -128,54 +174,59 @@ impl<
         self.payload.as_deref()
     }
 
-    pub async fn reply(&self, ke: &'static keyexpr, payload: &[u8]) -> ZResult<()> {
+    pub async fn reply(&self, ke: &keyexpr, payload: &[u8]) -> crate::ZResult<()> {
         let wke = WireExpr::from(ke);
 
-        let response = NetworkBody::Response(Response {
+        let response = Response {
             rid: self.rid,
             wire_expr: wke,
-            qos: QoS::DEFAULT,
-            timestamp: None,
-            respid: None,
             payload: ResponseBody::Reply(Reply {
                 consolidation: ConsolidationMode::None,
                 payload: PushBody::Put(Put {
                     payload,
-                    attachment: None,
-                    encoding: Encoding::DEFAULT,
-                    timestamp: None,
-                    sinfo: None,
+                    ..Default::default()
                 }),
             }),
-        });
+            ..Default::default()
+        };
 
         self.driver.send(response).await
     }
 
-    pub async fn err(&self, payload: &[u8]) -> ZResult<()> {
-        let response = NetworkBody::Response(Response {
+    pub async fn err(&self, ke: &keyexpr, payload: &[u8]) -> crate::ZResult<()> {
+        let wke = WireExpr::from(ke);
+
+        let response = Response {
             rid: self.rid,
-            wire_expr: WireExpr::from(self.keyexpr()),
-            qos: QoS::DEFAULT,
-            timestamp: None,
-            respid: None,
+            wire_expr: wke,
             payload: ResponseBody::Err(Err {
-                encoding: Encoding::DEFAULT,
-                sinfo: None,
                 payload,
+                ..Default::default()
             }),
-        });
+            ..Default::default()
+        };
 
         self.driver.send(response).await
     }
 
-    pub async fn finalize(&self) -> ZResult<()> {
-        let response: NetworkBody<'static> = NetworkBody::ResponseFinal(ResponseFinal {
+    pub async fn finalize(self) -> crate::ZResult<()> {
+        let response = ResponseFinal {
             rid: self.rid,
-            qos: QoS::DEFAULT,
-            timestamp: None,
-        });
+            ..Default::default()
+        };
 
         self.driver.send(response).await
+    }
+}
+
+impl<'a, const MAX_KEYEXPR: usize, const MAX_PARAMETERS: usize, const MAX_PAYLOAD: usize, Config>
+    TryFrom<&Query<'a, Config>> for HeaplessQuery<MAX_KEYEXPR, MAX_PARAMETERS, MAX_PAYLOAD, Config>
+where
+    Config: ZConfig,
+{
+    type Error = crate::CollectionError;
+
+    fn try_from(q: &Query<'a, Config>) -> Result<Self, Self::Error> {
+        HeaplessQuery::new(q.driver, q.rid, q.keyexpr, q.parameters, q.payload)
     }
 }

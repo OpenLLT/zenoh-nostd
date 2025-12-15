@@ -1,55 +1,69 @@
-use core::str::FromStr;
+use higher_kinded_types::ForLt;
+use zenoh_proto::keyexpr;
 
-use heapless::{String, Vec};
-use zenoh_proto::{ZError, ZResult, keyexpr};
+pub(crate) type SampleRef = ForLt!(<'a> = &'a Sample<'a>);
 
-pub struct ZSample<'a> {
+pub struct Sample<'a> {
     keyexpr: &'a keyexpr,
     payload: &'a [u8],
 }
 
-impl<'a> ZSample<'a> {
-    pub(crate) fn new(keyexpr: &'a keyexpr, payload: &'a [u8]) -> ZSample<'a> {
-        ZSample { keyexpr, payload }
-    }
-
-    pub fn keyexpr(&self) -> &'a keyexpr {
-        self.keyexpr
-    }
-
-    pub fn payload(&self) -> &'a [u8] {
-        self.payload
-    }
-
-    pub(crate) fn into_owned<const KE: usize, const PL: usize>(
-        self,
-    ) -> ZResult<ZOwnedSample<KE, PL>> {
-        Ok(ZOwnedSample::new(
-            String::from_str(self.keyexpr.as_str()).map_err(|_| ZError::CapacityExceeded)?,
-            Vec::from_slice(self.payload).map_err(|_| ZError::CapacityExceeded)?,
-        ))
-    }
-}
-
-#[derive(Debug)]
-pub struct ZOwnedSample<const MAX_KEYEXPR: usize, const MAX_PAYLOAD: usize> {
-    keyexpr: String<MAX_KEYEXPR>,
-    payload: Vec<u8, MAX_PAYLOAD>,
-}
-
-impl<const MAX_KEYEXPR: usize, const MAX_PAYLOAD: usize> ZOwnedSample<MAX_KEYEXPR, MAX_PAYLOAD> {
-    pub(crate) fn new(
-        keyexpr: String<MAX_KEYEXPR>,
-        payload: Vec<u8, MAX_PAYLOAD>,
-    ) -> ZOwnedSample<MAX_KEYEXPR, MAX_PAYLOAD> {
-        ZOwnedSample { keyexpr, payload }
+impl<'a> Sample<'a> {
+    pub fn new(keyexpr: &'a keyexpr, payload: &'a [u8]) -> Self {
+        Self { keyexpr, payload }
     }
 
     pub fn keyexpr(&self) -> &keyexpr {
-        keyexpr::from_str_unchecked(self.keyexpr.as_str())
+        self.keyexpr
     }
 
-    pub fn payload(&self) -> &'_ [u8] {
+    pub fn payload(&self) -> &[u8] {
+        self.payload
+    }
+}
+
+pub struct HeaplessSample<const MAX_KEYEXPR: usize, const MAX_PAYLOAD: usize> {
+    keyexpr: heapless::String<MAX_KEYEXPR>,
+    payload: heapless::Vec<u8, MAX_PAYLOAD>,
+}
+
+impl<const MAX_KEYEXPR: usize, const MAX_PAYLOAD: usize> HeaplessSample<MAX_KEYEXPR, MAX_PAYLOAD> {
+    pub fn new(
+        keyexpr: &keyexpr,
+        payload: &[u8],
+    ) -> core::result::Result<Self, crate::CollectionError> {
+        let mut ke_str = heapless::String::<MAX_KEYEXPR>::new();
+        ke_str
+            .push_str(keyexpr.as_str())
+            .map_err(|_| crate::CollectionError::CollectionIsFull)?;
+
+        let mut pl_vec = heapless::Vec::<u8, MAX_PAYLOAD>::new();
+        pl_vec
+            .extend_from_slice(payload)
+            .map_err(|_| crate::CollectionError::CollectionIsFull)?;
+
+        Ok(Self {
+            keyexpr: ke_str,
+            payload: pl_vec,
+        })
+    }
+
+    pub fn keyexpr(&self) -> &keyexpr {
+        // SAFETY: we ensure that the keyexpr is always valid
+        unsafe { keyexpr::new(self.keyexpr.as_str()).unwrap_unchecked() }
+    }
+
+    pub fn payload(&self) -> &[u8] {
         &self.payload
+    }
+}
+
+impl<const MAX_KEYEXPR: usize, const MAX_PAYLOAD: usize> TryFrom<&Sample<'_>>
+    for HeaplessSample<MAX_KEYEXPR, MAX_PAYLOAD>
+{
+    type Error = crate::CollectionError;
+
+    fn try_from(sample: &Sample<'_>) -> core::result::Result<Self, Self::Error> {
+        Self::new(sample.keyexpr(), sample.payload())
     }
 }

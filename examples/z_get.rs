@@ -2,38 +2,9 @@
 #![cfg_attr(feature = "esp32s3", no_main)]
 #![cfg_attr(feature = "wasm", no_main)]
 
+use static_cell::StaticCell;
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, ZReply, keyexpr};
-
-const CONNECT: &str = match option_env!("CONNECT") {
-    Some(v) => v,
-    None => {
-        if cfg!(feature = "wasm") {
-            "ws/127.0.0.1:7446"
-        } else {
-            "tcp/127.0.0.1:7447"
-        }
-    }
-};
-
-fn callback(reply: &ZReply) {
-    match reply {
-        ZReply::Ok(reply) => {
-            zenoh_nostd::info!(
-                "[Query] Received OK Reply ('{}': '{:?}')",
-                reply.keyexpr().as_str(),
-                core::str::from_utf8(reply.payload()).unwrap()
-            );
-        }
-        ZReply::Err(reply) => {
-            zenoh_nostd::error!(
-                "[Query] Received ERR Reply ('{}': '{:?}')",
-                reply.keyexpr().as_str(),
-                core::str::from_utf8(reply.payload()).unwrap()
-            );
-        }
-    }
-}
+use zenoh_nostd::api::*;
 
 async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
     #[cfg(feature = "log")]
@@ -41,27 +12,40 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 
     zenoh_nostd::info!("zenoh-nostd z_get example");
 
-    let platform = init_platform(&spawner).await;
-    let config = zenoh_nostd::zconfig!(
-            Platform: (spawner, platform),
-            TX: 512,
-            RX: 512,
-            MAX_SUBSCRIBERS: 2,
-            MAX_QUERIES: 2,
-            MAX_QUERYABLES: 2
-    );
+    let config = init_example(&spawner).await;
+    static RESOURCES: StaticCell<Resources<ExampleConfig>> = StaticCell::new();
+    let session = zenoh_nostd::api::open(
+        RESOURCES.init(Resources::new()),
+        config,
+        EndPoint::try_from(CONNECT)?,
+    )
+    .await?;
 
-    let session = zenoh_nostd::open!(config, EndPoint::try_from(CONNECT)?);
+    let get = session
+        .get(keyexpr::new("demo/example/**")?)
+        .finish()
+        .await?;
 
-    let ke = keyexpr::new("demo/example/**").unwrap();
+    embassy_futures::select::select(session.run(), async {
+        while let Ok(response) = get.recv().await {
+            if response.is_ok() {
+                zenoh_nostd::info!(
+                    "[Get] Received OK Reply ('{}': '{:?}')",
+                    response.keyexpr().as_str(),
+                    core::str::from_utf8(response.payload()).unwrap()
+                );
+            } else {
+                zenoh_nostd::info!(
+                    "[Get] Received ERR Reply ('{}': '{:?}')",
+                    response.keyexpr().as_str(),
+                    core::str::from_utf8(response.payload()).unwrap()
+                );
+            }
+        }
+    })
+    .await;
 
-    // Because of memory growth concerns with async channels, `session.get`
-    // only supports callback-based usage in `zenoh-nostd`.
-    session.get(ke, callback).send().await.unwrap();
-
-    loop {
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
-    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "std", embassy_executor::main)]
@@ -69,7 +53,7 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 #[cfg_attr(feature = "esp32s3", esp_rtos::main)]
 async fn main(spawner: embassy_executor::Spawner) {
     if let Err(e) = entry(spawner).await {
-        zenoh_nostd::error!("Error in main: {:?}", e);
+        zenoh_nostd::error!("Error in main: {}", e);
     }
 
     zenoh_nostd::info!("Exiting main");

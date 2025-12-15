@@ -4,10 +4,10 @@ use std::{
     time::Instant,
 };
 
-use zenoh_proto::{ZError, ZResult, keyexpr};
+use zenoh_proto::{Error, ZResult, keyexpr};
 use zenoh_sansio::event::Event;
 
-fn entry() -> ZResult<()> {
+fn entry() -> crate::ZResult<()> {
     env_logger::init();
 
     zenoh_proto::info!("zenoh-sansio z_put example");
@@ -17,7 +17,7 @@ fn entry() -> ZResult<()> {
     // Also create a TCP link.
     let mut rx = [0u8; 1024];
     let mut tx = [0u8; 1024];
-    let mut tcp = TcpStream::connect("127.0.0.1:7447").map_err(|_| ZError::CouldNotConnect)?;
+    let mut tcp = TcpStream::connect("127.0.0.1:7447").map_err(|_| Error::CouldNotConnect)?;
 
     // To be system agnostic, the way to measure time is left to the user, the session
     // only requires a `Duration` representing the elapsed time since the session creation.
@@ -65,7 +65,7 @@ fn entry() -> ZResult<()> {
 
     // Main loop: send a PUT request every second. Set the TCP stream to non-blocking.
     tcp.set_nonblocking(true)
-        .map_err(|_| ZError::ConfigNotSupported)?;
+        .map_err(|_| Error::ConfigNotSupported)?;
     while !session.disconnected() {
         // This creates a PUT event.
         let put = session.put(ke, payload);
@@ -100,21 +100,21 @@ fn main() {
     }
 }
 
-fn tcp_write(tcp: &mut TcpStream, buffer: &[u8]) -> ZResult<()> {
+fn tcp_write(tcp: &mut TcpStream, buffer: &[u8]) -> crate::ZResult<()> {
     tcp.write_all(&(buffer.len() as u16).to_le_bytes())
-        .map_err(|_| ZError::TxError)
+        .map_err(|_| Error::TxError)
         .map(|_| ())?;
 
     tcp.write_all(buffer)
-        .map_err(|_| ZError::TxError)
+        .map_err(|_| Error::TxError)
         .map(|_| ())
 }
 
-fn tcp_read(tcp: &mut TcpStream, buffer: &mut [u8]) -> ZResult<usize> {
+fn tcp_read(tcp: &mut TcpStream, buffer: &mut [u8]) -> crate::ZResult<usize> {
     let mut len = [0u8; 2];
-    tcp.read_exact(&mut len).map_err(|_| ZError::InvalidRx)?;
+    tcp.read_exact(&mut len).map_err(|_| Error::InvalidRx)?;
     let n = u16::from_le_bytes(len) as usize;
     tcp.read_exact(&mut buffer[..n])
-        .map_err(|_| ZError::InvalidRx)
+        .map_err(|_| Error::InvalidRx)
         .map(|_| n)
 }

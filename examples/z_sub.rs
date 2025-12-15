@@ -2,38 +2,9 @@
 #![cfg_attr(feature = "esp32s3", no_main)]
 #![cfg_attr(feature = "wasm", no_main)]
 
+use static_cell::StaticCell;
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, ZSample, ZSubscriber, keyexpr, zsubscriber};
-
-const CONNECT: &str = match option_env!("CONNECT") {
-    Some(v) => v,
-    None => {
-        if cfg!(feature = "wasm") {
-            "ws/127.0.0.1:7446"
-        } else {
-            "tcp/127.0.0.1:7447"
-        }
-    }
-};
-
-fn callback_1(sample: &ZSample) {
-    zenoh_nostd::info!(
-        "[Subscriber] Received Sample ('{}': '{:?}')",
-        sample.keyexpr().as_str(),
-        core::str::from_utf8(sample.payload()).unwrap()
-    );
-}
-
-#[embassy_executor::task]
-async fn callback_2(subscriber: ZSubscriber<32, 128>) {
-    while let Ok(sample) = subscriber.recv().await {
-        zenoh_nostd::info!(
-            "[Async Subscriber] Received Sample ('{}': '{:?}')",
-            sample.keyexpr().as_str(),
-            core::str::from_utf8(sample.payload()).unwrap()
-        );
-    }
-}
+use zenoh_nostd::api::*;
 
 async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
     #[cfg(feature = "log")]
@@ -41,36 +12,45 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 
     zenoh_nostd::info!("zenoh-nostd z_sub example");
 
-    let platform = init_platform(&spawner).await;
-    let config = zenoh_nostd::zconfig!(
-            Platform: (spawner, platform),
-            TX: 512,
-            RX: 512,
-            MAX_SUBSCRIBERS: 2,
-            MAX_QUERIES: 2,
-            MAX_QUERYABLES: 2
-    );
+    let config = init_example(&spawner).await;
+    static RESOURCES: StaticCell<Resources<ExampleConfig>> = StaticCell::new();
+    let session = zenoh_nostd::api::open(
+        RESOURCES.init(Resources::new()),
+        config,
+        EndPoint::try_from(CONNECT)?,
+    )
+    .await?;
 
-    let session = zenoh_nostd::open!(config, EndPoint::try_from(CONNECT)?);
+    // In this example we care about maintaining the session alive, we then have two choices:
+    //  1) Spawn a new task to run the `session.run()` in background, but it requires the `resources` to be `static`.
+    //  2) Use `select` or `join` to run both the session and the subscriber in the same task.
+    // Here we use the second approach. For a demonstration of the first approach, see the `z_open` example.
+    //
+    // Note: Currently, due to some limitations of the design, the `resources` must be `'static`. Future work
+    // may alleviate this requirement.
 
-    let ke = keyexpr::new("demo/example/**")?;
-
-    let _sync_sub = session
-        .declare_subscriber(ke, zsubscriber!(callback_1))
+    let subscriber = session
+        .declare_subscriber(keyexpr::new("demo/example/**")?)
+        .finish()
         .await?;
 
-    let async_sub = session
-        .declare_subscriber(
-            ke,
-            zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
-        )
-        .await?;
+    embassy_futures::select::select(session.run(), async {
+        while let Ok(sample) = subscriber.recv().await {
+            zenoh_nostd::info!(
+                "[Subscriber] Received sample ('{}': '{}')",
+                sample.keyexpr().as_str(),
+                core::str::from_utf8(sample.payload()).unwrap()
+            );
+        }
 
-    spawner.spawn(callback_2(async_sub)).unwrap();
+        Ok::<(), zenoh_nostd::Error>(())
+    })
+    .await;
 
-    loop {
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
-    }
+    zenoh_nostd::info!("[Subscriber] Undeclaring subscriber and exiting...");
+    subscriber.undeclare().await?;
+
+    Ok(())
 }
 
 #[cfg_attr(feature = "std", embassy_executor::main)]
@@ -78,7 +58,7 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 #[cfg_attr(feature = "esp32s3", esp_rtos::main)]
 async fn main(spawner: embassy_executor::Spawner) {
     if let Err(e) = entry(spawner).await {
-        zenoh_nostd::error!("Error in main: {:?}", e);
+        zenoh_nostd::error!("Error in main: {}", e);
     }
 
     zenoh_nostd::info!("Exiting main");

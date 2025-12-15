@@ -1,5 +1,10 @@
 #![no_std]
 
+use zenoh_nostd::api::{
+    HeaplessGetCallbacks, HeaplessGetChannels, HeaplessQueryableCallbacks,
+    HeaplessQueryableChannels, HeaplessSubscriberCallbacks, HeaplessSubscriberChannels, ZConfig,
+};
+
 #[cfg(feature = "std")]
 pub use zenoh_std::PlatformStd as Platform;
 
@@ -27,16 +32,74 @@ mod esp32s3_app {
 #[cfg(feature = "esp32s3")]
 use esp32s3_app::*;
 
-pub async fn init_platform(spawner: &embassy_executor::Spawner) -> Platform {
+pub const CONNECT: &str = match option_env!("CONNECT") {
+    Some(v) => v,
+    None => {
+        if cfg!(feature = "wasm") {
+            "ws/127.0.0.1:7446"
+        } else {
+            "tcp/127.0.0.1:7447"
+        }
+    }
+};
+
+#[cfg(feature = "esp32s3")]
+const BUFF_SIZE: u16 = 512u16;
+#[cfg(not(feature = "esp32s3"))]
+const BUFF_SIZE: u16 = u16::MAX;
+
+pub struct ExampleConfig {
+    platform: Platform,
+    tx: [u8; BUFF_SIZE as usize],
+    rx: [u8; BUFF_SIZE as usize],
+}
+
+impl ZConfig for ExampleConfig {
+    type Platform = Platform;
+
+    type SubscriberCallbacks = HeaplessSubscriberCallbacks<8, 128, 128, 8, 8>;
+    type SubscriberChannels = HeaplessSubscriberChannels<64, 256, 8, 8>;
+
+    type GetCallbacks = HeaplessGetCallbacks<8, 128, 128, 8, 8>;
+    type GetChannels = HeaplessGetChannels<64, 256, 8, 8>;
+
+    type QueryableCallbacks = HeaplessQueryableCallbacks<Self, 8, 128, 2048, 8, 8>;
+    type QueryableChannels = HeaplessQueryableChannels<Self, 64, 256, 256, 8, 8>;
+
+    type TxBuf = [u8; BUFF_SIZE as usize];
+    type RxBuf = [u8; BUFF_SIZE as usize];
+
+    fn platform(&self) -> &Self::Platform {
+        &self.platform
+    }
+
+    fn txrx(&mut self) -> (&mut Self::TxBuf, &mut Self::RxBuf) {
+        (&mut self.tx, &mut self.rx)
+    }
+
+    fn into_parts(self) -> (Self::Platform, Self::TxBuf, Self::RxBuf) {
+        (self.platform, self.tx, self.rx)
+    }
+}
+
+pub async fn init_example(spawner: &embassy_executor::Spawner) -> ExampleConfig {
     #[cfg(feature = "std")]
     {
         let _ = spawner;
-        Platform {}
+        ExampleConfig {
+            platform: Platform {},
+            tx: [0; BUFF_SIZE as usize],
+            rx: [0; BUFF_SIZE as usize],
+        }
     }
     #[cfg(feature = "wasm")]
     {
         let _ = spawner;
-        Platform {}
+        ExampleConfig {
+            platform: Platform {},
+            tx: [0; BUFF_SIZE as usize],
+            rx: [0; BUFF_SIZE as usize],
+        }
     }
     #[cfg(feature = "esp32s3")]
     {
@@ -98,7 +161,21 @@ pub async fn init_platform(spawner: &embassy_executor::Spawner) -> Platform {
         };
         zenoh_nostd::info!("Network initialized with IP: {}", ip);
 
-        Platform { stack }
+        fn tcp() -> (&'static mut [u8], &'static mut [u8]) {
+            static TX: StaticCell<[u8; BUFF_SIZE as usize]> = StaticCell::new();
+            let tx = TX.init([0; BUFF_SIZE as usize]);
+
+            static RX: StaticCell<[u8; BUFF_SIZE as usize]> = StaticCell::new();
+            let rx = RX.init([0; BUFF_SIZE as usize]);
+
+            (tx, rx)
+        }
+
+        ExampleConfig {
+            platform: Platform { stack, tcp },
+            tx: [0; BUFF_SIZE as usize],
+            rx: [0; BUFF_SIZE as usize],
+        }
     }
 }
 

@@ -1,8 +1,9 @@
 use core::{fmt::Debug, time::Duration};
 
 use zenoh_proto::{
-    Reliability, Resolution, WhatAmI, ZCodecError, ZResult, ZenohIdProto,
-    network::{NetworkBody, QoS},
+    crate::ZCodecError,
+    Reliability, Resolution, WhatAmI, ZResult, ZenohIdProto,
+    network::{FrameBody, QoS},
     transport::{
         Batch,
         init::{BatchSize, InitExt, InitIdentifier, InitResolution, InitSyn},
@@ -122,7 +123,7 @@ impl Session {
         tx: &mut [u8],
         events: impl Iterator<Item = Event<'a>>,
         mut out: impl FnMut(&[u8]) -> core::result::Result<(), E>,
-    ) -> ZResult<()> {
+    ) -> crate::ZResult<()> {
         let mut batch = Batch::new(
             &mut tx[..],
             match &self.state {
@@ -143,11 +144,7 @@ impl Session {
                         continue;
                     }
 
-                    batch.write_msg(
-                        &NetworkBody::Push(push),
-                        Reliability::Reliable,
-                        QoS::DEFAULT,
-                    )?
+                    batch.write_msg(&FrameBody::Push(push), Reliability::Reliable, QoS::DEFAULT)?
                 }
                 EventInner::KeepAlive => {
                     keepalive = true;

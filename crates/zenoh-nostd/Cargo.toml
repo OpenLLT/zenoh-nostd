@@ -19,9 +19,10 @@ web_console = ["zenoh-proto/web_console"] # Use `web-sys` crate for logging in w
 [dependencies]
 zenoh-proto.workspace = true
 sha3.workspace = true
+elain.workspace = true
+higher-kinded-types.workspace = true
 embassy-futures.workspace = true
 embassy-time.workspace = true
 embassy-sync.workspace = true
-embassy-executor.workspace = true
 heapless.workspace = true
-static_cell.workspace = true
+paste.workspace = true

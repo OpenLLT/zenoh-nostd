@@ -2,19 +2,16 @@
 #![cfg_attr(feature = "esp32s3", no_main)]
 #![cfg_attr(feature = "wasm", no_main)]
 
+use static_cell::StaticCell;
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, keyexpr, zsubscriber};
+use zenoh_nostd::api::*;
 
-const CONNECT: &str = match option_env!("CONNECT") {
-    Some(v) => v,
-    None => {
-        if cfg!(feature = "wasm") {
-            "ws/127.0.0.1:7446"
-        } else {
-            "tcp/127.0.0.1:7447"
-        }
+#[embassy_executor::task]
+async fn session_task(session: Session<'static, ExampleConfig>) {
+    if let Err(e) = session.run().await {
+        zenoh_nostd::error!("Error in session task: {}", e);
     }
-};
+}
 
 async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
     #[cfg(feature = "log")]
@@ -22,30 +19,32 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 
     zenoh_nostd::info!("zenoh-nostd z_pong example");
 
-    let platform = init_platform(&spawner).await;
-    let config = zenoh_nostd::zconfig!(
-            Platform: (spawner, platform),
-            TX: 512,
-            RX: 512,
-            MAX_SUBSCRIBERS: 2,
-            MAX_QUERIES: 2,
-            MAX_QUERYABLES: 2
-    );
+    let config = init_example(&spawner).await;
+    static RESOURCES: StaticCell<Resources<ExampleConfig>> = StaticCell::new();
+    let session = zenoh_nostd::api::open(
+        RESOURCES.init(Resources::new()),
+        config,
+        EndPoint::try_from(CONNECT)?,
+    )
+    .await?;
 
-    let session = zenoh_nostd::open!(config, EndPoint::try_from(CONNECT)?);
+    spawner.spawn(session_task(session.clone())).map_err(|e| {
+        zenoh_nostd::error!("Error spawning task: {}", e);
+        zenoh_nostd::SessionError::CouldNotSpawnEmbassyTask
+    })?;
 
-    let ke_pong = keyexpr::new("test/pong")?;
-    let ke_ping = keyexpr::new("test/ping")?;
-
-    let sub = session
-        .declare_subscriber(
-            ke_ping,
-            zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
-        )
+    let ping = session
+        .declare_subscriber(keyexpr::new("test/ping")?)
+        .finish()
         .await?;
 
-    while let Ok(sample) = sub.recv().await {
-        session.put(ke_pong, sample.payload()).await?;
+    let pong = session
+        .declare_publisher(keyexpr::new("test/pong")?)
+        .finish()
+        .await?;
+
+    while let Ok(sample) = ping.recv().await {
+        pong.put(sample.payload()).finish().await?;
     }
 
     Ok(())
@@ -56,7 +55,7 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 #[cfg_attr(feature = "esp32s3", esp_rtos::main)]
 async fn main(spawner: embassy_executor::Spawner) {
     if let Err(e) = entry(spawner).await {
-        zenoh_nostd::error!("Error in main: {:?}", e);
+        zenoh_nostd::error!("Error in main: {}", e);
     }
 
     zenoh_nostd::info!("Exiting main");
