@@ -21,6 +21,3 @@ web_console = ["zenoh-proto/web_console"] # Use `web-sys` crate for logging in w
 zenoh-proto.workspace = true
 sha3.workspace = true
 heapless.workspace = true
-
-[dev-dependencies]
-env_logger = { version = "0.11.8" }
