@@ -1,6 +1,6 @@
 use crate::{exts::*, fields::*, msgs::*, *};
 
-#[derive(ZEnum, Debug, PartialEq)]
+#[derive(ZEnum, Debug, PartialEq, Clone)]
 pub enum PushBody<'a> {
     Put(Put<'a>),
 }
@@ -11,7 +11,7 @@ impl Default for PushBody<'_> {
     }
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|M|N|ID:5=0x1d")]
 pub struct Push<'a> {
     #[zenoh(flatten, shift = 5)]

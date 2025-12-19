@@ -10,7 +10,7 @@ pub enum InterestMode {
     CurrentFuture = 0b11,
 }
 
-#[derive(ZStruct, Debug, Default)]
+#[derive(ZStruct, Debug, Default, Clone)]
 #[zenoh(header = "A|M|N|R|T|Q|S|K")]
 pub struct InterestInner<'a> {
     #[zenoh(header = FULL)]
@@ -20,7 +20,7 @@ pub struct InterestInner<'a> {
     pub wire_expr: Option<WireExpr<'a>>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|MODE:2|ID:5=0x19")]
 pub struct Interest<'a> {
     pub id: u32,
@@ -38,7 +38,7 @@ pub struct Interest<'a> {
     pub nodeid: NodeId,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|MODE:2=0x0|ID:5=0x19")]
 pub struct InterestFinal {
     pub id: u32,

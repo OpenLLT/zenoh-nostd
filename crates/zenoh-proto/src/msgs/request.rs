@@ -2,7 +2,7 @@ use core::time::Duration;
 
 use crate::{exts::*, fields::*, msgs::*, *};
 
-#[derive(ZEnum, Debug, PartialEq)]
+#[derive(ZEnum, Debug, PartialEq, Clone)]
 pub enum RequestBody<'a> {
     Query(Query<'a>),
 }
@@ -13,7 +13,7 @@ impl Default for RequestBody<'_> {
     }
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|M|N|ID:5=0x1c")]
 pub struct Request<'a> {
     pub id: u32,

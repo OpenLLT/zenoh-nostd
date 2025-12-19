@@ -1,6 +1,6 @@
 use crate::{exts::*, fields::*, *};
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|_|I|ID:5=0x1e")]
 pub struct Declare<'a> {
     #[zenoh(presence = header(I))]
@@ -16,7 +16,7 @@ pub struct Declare<'a> {
     pub body: DeclareBody<'a>,
 }
 
-#[derive(ZEnum, Debug, PartialEq)]
+#[derive(ZEnum, Debug, PartialEq, Clone)]
 pub enum DeclareBody<'a> {
     DeclareKeyExpr(DeclareKeyExpr<'a>),
     UndeclareKeyExpr(UndeclareKeyExpr),
@@ -35,7 +35,7 @@ impl Default for DeclareBody<'_> {
     }
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "_|M|N|ID:5=0x00")]
 pub struct DeclareKeyExpr<'a> {
     pub id: u16,
@@ -43,13 +43,13 @@ pub struct DeclareKeyExpr<'a> {
     pub wire_expr: WireExpr<'a>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "_:3|ID:5=0x01")]
 pub struct UndeclareKeyExpr {
     pub id: u16,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "_|M|N|ID:5=0x02")]
 pub struct DeclareSubscriber<'a> {
     pub id: u32,
@@ -57,7 +57,7 @@ pub struct DeclareSubscriber<'a> {
     pub wire_expr: WireExpr<'a>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|_:2|ID:5=0x03")]
 pub struct UndeclareSubscriber<'a> {
     pub id: u32,
@@ -65,7 +65,7 @@ pub struct UndeclareSubscriber<'a> {
     pub wire_expr: Option<WireExpr<'a>>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|M|N|ID:5=0x04")]
 pub struct DeclareQueryable<'a> {
     pub id: u32,
@@ -76,7 +76,7 @@ pub struct DeclareQueryable<'a> {
     pub qinfo: QueryableInfo,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|_:2|ID:5=0x05")]
 pub struct UndeclareQueryable<'a> {
     pub id: u32,
@@ -84,7 +84,7 @@ pub struct UndeclareQueryable<'a> {
     pub wire_expr: Option<WireExpr<'a>>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|M|N|ID:5=0x06")]
 pub struct DeclareToken<'a> {
     pub id: u32,
@@ -92,7 +92,7 @@ pub struct DeclareToken<'a> {
     pub wire_expr: WireExpr<'a>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|_:2|ID:5=0x07")]
 pub struct UndeclareToken<'a> {
     pub id: u32,
@@ -100,6 +100,6 @@ pub struct UndeclareToken<'a> {
     pub wire_expr: Option<WireExpr<'a>>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|_:2|ID:5=0x1A")]
 pub struct DeclareFinal {}

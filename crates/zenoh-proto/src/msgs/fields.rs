@@ -12,13 +12,13 @@ pub enum Reliability {
 }
 
 #[repr(u8)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub enum Priority {
     #[default]
     Data = 5,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 #[repr(u8)]
 pub enum CongestionControl {
     #[default]
@@ -36,7 +36,7 @@ pub enum ConsolidationMode {
     Latest = 3,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct BatchSize(pub u16);
 
 impl Default for BatchSize {
@@ -376,7 +376,7 @@ pub enum Mapping {
     Sender = 1,
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "_:6|M|N|")]
 pub struct WireExpr<'a> {
     pub scope: u16,

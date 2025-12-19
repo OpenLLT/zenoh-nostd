@@ -4,10 +4,7 @@ use std::{
     time::Duration,
 };
 
-use zenoh_proto::{
-    BatchReader, BatchWriter, Message,
-    msgs::{InitAck, OpenAck},
-};
+use zenoh_proto::{BatchReader, BatchWriter, msgs::*};
 
 fn handle_client(mut stream: std::net::TcpStream) {
     let mut rx = [0; u16::MAX as usize];
@@ -22,7 +19,7 @@ fn handle_client(mut stream: std::net::TcpStream) {
     let mut batch = BatchReader::new(&rx[..l]);
     let _ = loop {
         match batch.next() {
-            Some(Message::InitSyn(i)) => break i,
+            Some(Message::Transport(TransportMessage::InitSyn(i))) => break i,
             Some(_) => continue,
             None => panic!("Did not receive InitSyn"),
         }

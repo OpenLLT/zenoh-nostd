@@ -1,6 +1,6 @@
 use crate::{exts::*, fields::*, *};
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "ZID:4|_:2|W:2")]
 pub struct InitIdentifier {
     #[zenoh(header = W)]
@@ -9,13 +9,13 @@ pub struct InitIdentifier {
     pub zid: ZenohIdProto,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 pub struct InitResolution {
     pub resolution: Resolution,
     pub batch_size: BatchSize,
 }
 
-#[derive(ZStruct, Debug, PartialEq)]
+#[derive(ZStruct, Debug, PartialEq, Clone)]
 #[zenoh(header = "Z|S|A:1=0|ID:5=0x01")]
 pub struct InitSyn<'a> {
     pub version: u8,
@@ -57,7 +57,7 @@ impl Default for InitSyn<'_> {
     }
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|S|A:1=1|ID:5=0x01")]
 pub struct InitAck<'a> {
     pub version: u8,

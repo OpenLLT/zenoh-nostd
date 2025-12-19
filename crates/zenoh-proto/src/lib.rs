@@ -14,7 +14,7 @@ mod bytes;
 pub use bytes::*;
 
 mod codec;
-pub(crate) use codec::*;
+pub use codec::*;
 
 mod ke;
 pub use ke::*;
@@ -22,8 +22,11 @@ pub use ke::*;
 pub mod msgs;
 pub use msgs::{exts, fields};
 
-mod batch;
-pub use batch::*;
+// mod batch;
+// pub use batch::*;
+
+mod transport;
+pub use transport::*;
 
 pub(crate) use zenoh_derive::*;
 

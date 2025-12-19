@@ -5,11 +5,11 @@ use std::{
 };
 
 use zenoh_proto::{
-    BatchReader, BatchWriter, Message,
+    BatchReader, BatchWriter,
     exts::QoS,
     fields::{Reliability, WireExpr},
     keyexpr,
-    msgs::{InitAck, OpenAck, Push, PushBody, Put},
+    msgs::*,
 };
 
 fn handle_client(mut stream: std::net::TcpStream) {

@@ -1,42 +1,9 @@
 use crate::{exts::*, fields::*, msgs::*, *};
 
 #[derive(Debug, PartialEq)]
-pub enum Message<'a> {
-    Close(Close),
-    InitSyn(InitSyn<'a>),
-    InitAck(InitAck<'a>),
-    KeepAlive(KeepAlive),
-    OpenSyn(OpenSyn<'a>),
-    OpenAck(OpenAck<'a>),
-
-    Push {
-        frame: FrameHeader,
-        body: Push<'a>,
-    },
-    Request {
-        frame: FrameHeader,
-        body: Request<'a>,
-    },
-    Response {
-        frame: FrameHeader,
-        body: Response<'a>,
-    },
-    ResponseFinal {
-        frame: FrameHeader,
-        body: ResponseFinal,
-    },
-    Interest {
-        frame: FrameHeader,
-        body: Interest<'a>,
-    },
-    InterestFinal {
-        frame: FrameHeader,
-        body: InterestFinal,
-    },
-    Declare {
-        frame: FrameHeader,
-        body: Declare<'a>,
-    },
+pub enum Header<'a> {
+    Owned(FrameHeader),
+    Borrowed(&'a FrameHeader),
 }
 
 pub struct BatchReader<'a, T> {
@@ -96,61 +63,57 @@ where
         let net = self.frame.is_some();
         let ifinal = header & 0b0110_0000 == 0;
 
+        let reliability = self.frame.as_ref().map(|f| f.reliability);
+        let qos = self.frame.as_ref().map(|f| f.qos);
+
         let body = match header & 0b0001_1111 {
-            InitAck::ID if ack => Message::InitAck(decode!(InitAck)),
-            InitSyn::ID => Message::InitSyn(decode!(InitSyn)),
-            OpenAck::ID if ack => Message::OpenAck(decode!(OpenAck)),
-            OpenSyn::ID => Message::OpenSyn(decode!(OpenSyn)),
-            Close::ID => Message::Close(decode!(Close)),
-            KeepAlive::ID => Message::KeepAlive(decode!(KeepAlive)),
+            InitAck::ID if ack => Message::Transport(TransportMessage::InitAck(decode!(InitAck))),
+            InitSyn::ID => Message::Transport(TransportMessage::InitSyn(decode!(InitSyn))),
+            OpenAck::ID if ack => Message::Transport(TransportMessage::OpenAck(decode!(OpenAck))),
+            OpenSyn::ID => Message::Transport(TransportMessage::OpenSyn(decode!(OpenSyn))),
+            Close::ID => Message::Transport(TransportMessage::Close(decode!(Close))),
+            KeepAlive::ID => Message::Transport(TransportMessage::KeepAlive(decode!(KeepAlive))),
 
             FrameHeader::ID => {
                 let frame = decode!(FrameHeader);
                 self.frame = Some(frame);
                 return self.next();
             }
-            Push::ID if net => Message::Push {
-                frame: self
-                    .frame
-                    .expect("Should be a frame. Something went wrong."),
+            Push::ID if net => Message::Network(NetworkMessage::Push {
+                reliability: reliability.expect("Should be a frame. Something went wrong."),
+                qos: qos.expect("Should be a frame. Something went wrong."),
                 body: decode!(Push),
-            },
-            Request::ID if net => Message::Request {
-                frame: self
-                    .frame
-                    .expect("Should be a frame. Something went wrong."),
+            }),
+            Request::ID if net => Message::Network(NetworkMessage::Request {
+                reliability: reliability.expect("Should be a frame. Something went wrong."),
+                qos: qos.expect("Should be a frame. Something went wrong."),
                 body: decode!(Request),
-            },
-            Response::ID if net => Message::Response {
-                frame: self
-                    .frame
-                    .expect("Should be a frame. Something went wrong."),
+            }),
+            Response::ID if net => Message::Network(NetworkMessage::Response {
+                reliability: reliability.expect("Should be a frame. Something went wrong."),
+                qos: qos.expect("Should be a frame. Something went wrong."),
                 body: decode!(Response),
-            },
-            ResponseFinal::ID if net => Message::ResponseFinal {
-                frame: self
-                    .frame
-                    .expect("Should be a frame. Something went wrong."),
+            }),
+            ResponseFinal::ID if net => Message::Network(NetworkMessage::ResponseFinal {
+                reliability: reliability.expect("Should be a frame. Something went wrong."),
+                qos: qos.expect("Should be a frame. Something went wrong."),
                 body: decode!(ResponseFinal),
-            },
-            InterestFinal::ID if net && ifinal => Message::InterestFinal {
-                frame: self
-                    .frame
-                    .expect("Should be a frame. Something went wrong."),
+            }),
+            InterestFinal::ID if net && ifinal => Message::Network(NetworkMessage::InterestFinal {
+                reliability: reliability.expect("Should be a frame. Something went wrong."),
+                qos: qos.expect("Should be a frame. Something went wrong."),
                 body: decode!(InterestFinal),
-            },
-            Interest::ID if net => Message::Interest {
-                frame: self
-                    .frame
-                    .expect("Should be a frame. Something went wrong."),
+            }),
+            Interest::ID if net => Message::Network(NetworkMessage::Interest {
+                reliability: reliability.expect("Should be a frame. Something went wrong."),
+                qos: qos.expect("Should be a frame. Something went wrong."),
                 body: decode!(Interest),
-            },
-            Declare::ID if net => Message::Declare {
-                frame: self
-                    .frame
-                    .expect("Should be a frame. Something went wrong."),
+            }),
+            Declare::ID if net => Message::Network(NetworkMessage::Declare {
+                reliability: reliability.expect("Should be a frame. Something went wrong."),
+                qos: qos.expect("Should be a frame. Something went wrong."),
                 body: decode!(Declare),
-            },
+            }),
 
             _ => {
                 crate::error!(
@@ -170,7 +133,7 @@ pub struct BatchWriter<'a, T> {
     writer: T,
     _lt: core::marker::PhantomData<&'a ()>,
     frame: Option<FrameHeader>,
-    sn: u32,
+    pub(crate) sn: u32,
 
     init: usize,
 }
@@ -260,5 +223,77 @@ where
         <_ as ZEncode>::z_encode(x, &mut self.writer)?;
 
         Ok(())
+    }
+}
+
+pub struct OneShotWriter<'a, T>(BatchWriter<'a, T>);
+
+impl<'a, T> OneShotWriter<'a, T>
+where
+    T: crate::ZWriteable,
+{
+    pub fn new(writer: T) -> Self {
+        Self(BatchWriter::new(writer, 0))
+    }
+
+    pub fn unframed(
+        mut self,
+        x: &impl ZUnframed,
+    ) -> core::result::Result<(u32, usize), crate::CodecError> {
+        self.0.unframed(x)?;
+
+        Ok(self.0.finalize())
+    }
+
+    pub fn framed(
+        mut self,
+        x: &impl ZFramed,
+        r: Reliability,
+        qos: QoS,
+        sn: u32,
+    ) -> core::result::Result<(u32, usize), crate::CodecError> {
+        self.0.sn = sn;
+        self.0.framed(x, r, qos)?;
+
+        Ok(self.0.finalize())
+    }
+}
+
+pub struct AdvancingWriter<'a> {
+    buffer: &'a mut [u8],
+}
+
+impl<'a> AdvancingWriter<'a> {
+    pub fn new(buffer: &'a mut [u8]) -> Self {
+        Self { buffer }
+    }
+
+    pub fn unframed(
+        &mut self,
+        x: &impl ZUnframed,
+    ) -> core::result::Result<&'a mut [u8], crate::CodecError> {
+        let len = OneShotWriter::new(&mut self.buffer[..]).unframed(x)?.1;
+
+        let (written, remaining) = core::mem::take(&mut self.buffer).split_at_mut(len);
+        self.buffer = remaining;
+
+        Ok(written)
+    }
+
+    pub fn framed(
+        &mut self,
+        x: &impl ZFramed,
+        r: Reliability,
+        qos: QoS,
+        sn: u32,
+    ) -> core::result::Result<&'a mut [u8], crate::CodecError> {
+        let len = OneShotWriter::new(&mut self.buffer[..])
+            .framed(x, r, qos, sn)?
+            .1;
+
+        let (written, remaining) = core::mem::take(&mut self.buffer).split_at_mut(len);
+        self.buffer = remaining;
+
+        Ok(written)
     }
 }

@@ -75,9 +75,11 @@ pub trait ZReadable<'a> {
         let len = dst.len().min(self.remaining());
         let bytes = self.read_slice(len)?;
 
-        unsafe {
-            dst.get_unchecked_mut(..len).copy_from_slice(bytes);
-        }
+        // unsafe {
+        //     dst.get_unchecked_mut(..len).copy_from_slice(bytes);
+        // }
+
+        dst[..len].copy_from_slice(bytes);
 
         Ok(len)
     }
@@ -113,18 +115,25 @@ impl ZWriteable for &mut [u8] {
             crate::zbail!(crate::BytesError::DstIsFull);
         }
 
-        unsafe {
-            *self.get_unchecked_mut(0) = value;
-            *self = core::mem::take(self).get_unchecked_mut(1..);
-        }
+        // unsafe {
+        //     *self.get_unchecked_mut(0) = value;
+        //     *self = core::mem::take(self).get_unchecked_mut(1..);
+        // }
+        let (head, tail) = core::mem::take(self).split_at_mut(1);
+        head[0] = value;
+        *self = tail;
 
         Ok(())
     }
 
     fn write(&mut self, src: &'_ [u8]) -> core::result::Result<usize, crate::BytesError> {
         let len = src.len().min(self.len());
-        let (head, tail) = unsafe { core::mem::take(self).split_at_mut_unchecked(len) };
+        // let (head, tail) = unsafe { core::mem::take(self).split_at_mut_unchecked(len) };
+        if len == 0 {
+            return Ok(0);
+        }
 
+        let (head, tail) = core::mem::take(self).split_at_mut(len);
         head.copy_from_slice(&src[..len]);
         *self = tail;
 
@@ -158,7 +167,8 @@ impl ZWriteable for &mut [u8] {
             crate::zbail!(crate::BytesError::DstIsTooSmall);
         }
 
-        let (_, tail) = unsafe { core::mem::take(self).split_at_mut_unchecked(written) };
+        // let (_, tail) = unsafe { core::mem::take(self).split_at_mut_unchecked(written) };
+        let (_, tail) = core::mem::take(self).split_at_mut(written);
         *self = tail;
 
         Ok(written)
@@ -257,7 +267,8 @@ impl<'a> ZReadable<'a> for &'a [u8] {
             crate::zbail!(crate::BytesError::SrcIsEmpty)
         }
 
-        Ok(unsafe { *self.get_unchecked(0) })
+        // Ok(unsafe { *self.get_unchecked(0) })
+        Ok(self[0])
     }
 
     fn read_u8(&mut self) -> core::result::Result<u8, crate::BytesError> {
@@ -266,8 +277,10 @@ impl<'a> ZReadable<'a> for &'a [u8] {
             crate::zbail!(crate::BytesError::SrcIsEmpty);
         }
 
-        let value = unsafe { *self.get_unchecked(0) };
-        *self = unsafe { self.get_unchecked(1..) };
+        // let value = unsafe { *self.get_unchecked(0) };
+        // *self = unsafe { self.get_unchecked(1..) };
+        let value = self[0];
+        *self = &self[1..];
 
         Ok(value)
     }
@@ -283,9 +296,35 @@ impl<'a> ZReadable<'a> for &'a [u8] {
             crate::zbail!(crate::BytesError::SrcIsTooSmall);
         }
 
-        let (head, tail) = unsafe { self.split_at_unchecked(len) };
+        // let (head, tail) = unsafe { self.split_at_unchecked(len) };
+        let (head, tail) = self.split_at(len);
         *self = tail;
 
         Ok(head)
+    }
+}
+
+impl<T> ZWriteable for &mut T
+where
+    T: ZWriteable,
+{
+    fn remaining(&self) -> usize {
+        (**self).remaining()
+    }
+
+    fn write(&mut self, src: &'_ [u8]) -> core::result::Result<usize, crate::BytesError> {
+        (**self).write(src)
+    }
+
+    fn write_u8(&mut self, value: u8) -> core::result::Result<(), crate::BytesError> {
+        (**self).write_u8(value)
+    }
+
+    fn write_slot(
+        &mut self,
+        len: usize,
+        writer: impl FnOnce(&mut [u8]) -> usize,
+    ) -> core::result::Result<usize, crate::BytesError> {
+        (**self).write_slot(len, writer)
     }
 }

@@ -11,7 +11,9 @@ use zenoh_proto::msgs::KeepAlive;
 
 use crate::{
     api::{SessionResources, ZConfig},
-    io::transport::{TransportMineConfig, TransportOtherConfig, TransportRx, TransportTx},
+    io::transport::{
+        TransportLinkMineConfig, TransportLinkOtherConfig, TransportLinkRx, TransportLinkTx,
+    },
 };
 
 pub struct DriverTx<'a, Config>
@@ -19,11 +21,11 @@ where
     Config: ZConfig,
 {
     pub(crate) tx_buf: Config::TxBuf,
-    pub(crate) tx: TransportTx<'a, Config::Platform>,
+    pub(crate) tx: TransportLinkTx<'a, Config::Platform>,
     pub(crate) sn: u32,
 
     pub(crate) next_keepalive: Instant,
-    pub(crate) config: TransportMineConfig,
+    pub(crate) config: TransportLinkMineConfig,
 }
 
 pub struct DriverRx<'a, Config>
@@ -31,10 +33,10 @@ where
     Config: ZConfig,
 {
     pub(crate) rx_buf: Config::RxBuf,
-    pub(crate) rx: TransportRx<'a, Config::Platform>,
+    pub(crate) rx: TransportLinkRx<'a, Config::Platform>,
 
     pub(crate) last_read: Instant,
-    pub(crate) config: TransportOtherConfig,
+    pub(crate) config: TransportLinkOtherConfig,
 }
 
 pub struct Driver<'a, Config>

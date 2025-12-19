@@ -1,6 +1,6 @@
 use crate::{exts::*, fields::*, *};
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|E|T|ID:5=0x1")]
 pub struct Put<'a> {
     #[zenoh(presence = header(T))]

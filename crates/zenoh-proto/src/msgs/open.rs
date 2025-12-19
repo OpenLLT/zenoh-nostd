@@ -2,7 +2,7 @@ use core::time::Duration;
 
 use crate::{exts::*, *};
 
-#[derive(ZStruct, Debug, PartialEq)]
+#[derive(ZStruct, Debug, PartialEq, Clone)]
 #[zenoh(header = "Z|T|A:1=0|ID:5=0x02")]
 pub struct OpenSyn<'a> {
     #[zenoh(flatten, shift = 6)]
@@ -42,7 +42,7 @@ impl Default for OpenSyn<'_> {
     }
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|T|A:1=1|ID:5=0x02")]
 pub struct OpenAck<'a> {
     #[zenoh(flatten, shift = 6)]

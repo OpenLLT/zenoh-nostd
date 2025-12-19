@@ -111,7 +111,7 @@ crate::declare_zerror! {
     }
 
     #[doc = "Errors related to zenoh transports."]
-    enum TransportError: LinkError + CodecError {
+    enum TransportLinkError: LinkError + CodecError {
         #[doc = "Received invalid data."]
         #[err = "received invalid data"]
         InvalidRx = 40,
@@ -124,6 +124,16 @@ crate::declare_zerror! {
         #[doc = "Transport has been closed."]
         #[err = "transport has been closed"]
         TransportClosed = 53,
+    }
+
+    #[doc = "Errors related to zenoh transports."]
+    enum TransportError: CodecError {
+        #[doc = "TransportIsFull."]
+        #[err = "transport is full"]
+        TransportIsFull = 55,
+        #[doc = "Message too large for a batch."]
+        #[err = "message too large for a batch"]
+        MessageTooLargeForBatch = 56,
     }
 
     // --- Collections related errors ---
@@ -142,6 +152,20 @@ crate::declare_zerror! {
         #[doc = "Collection is empty."]
         #[err = "collection is empty"]
         CollectionIsEmpty = 63,
+    }
+
+    // --- Handshake related errors ---
+    #[doc = "Errors related to zenoh handshake."]
+    enum HandshakeError {
+        #[doc = "Handshake timed out."]
+        #[err = "handshake timed out"]
+        HandshakeTimedout = 50,
+        #[doc = "Invalid handshake response."]
+        #[err = "invalid handshake response"]
+        InvalidHandshakeResponse = 51,
+        #[doc = "Invalid peer resolution."]
+        #[err = "invalid peer resolution"]
+        InvalidPeerResolution = 52,
     }
 
     // --- Session related errors ---

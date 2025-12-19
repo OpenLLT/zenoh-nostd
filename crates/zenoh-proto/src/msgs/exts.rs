@@ -2,7 +2,7 @@ use core::time::Duration;
 
 use crate::{fields::*, *};
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "ID:4|_:4")]
 pub struct EntityGlobalId {
     #[zenoh(size = header(ID))]
@@ -11,13 +11,13 @@ pub struct EntityGlobalId {
     pub eid: u32,
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct SourceInfo {
     pub id: EntityGlobalId,
     pub sn: u32,
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct Value<'a> {
     pub encoding: Encoding<'a>,
 
@@ -66,7 +66,7 @@ impl QoS {
     }
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct NodeId {
     pub node_id: u16,
 }
@@ -79,7 +79,7 @@ pub enum QueryTarget {
     AllComplete = 2,
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct QueryableInfo {
     pub complete: bool,
     pub distance: u16,
@@ -130,7 +130,7 @@ impl QueryableInfo {
     }
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct Budget {
     pub budget: u32,
 }
@@ -215,42 +215,42 @@ impl<'a> ZExt<'a> for Duration {
     const KIND: ZExtKind = ZExtKind::U64;
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct HasQoS {}
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct QoSLink {
     pub qos: u64,
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct Auth<'a> {
     #[zenoh(size = remain)]
     pub payload: &'a [u8],
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct MultiLink<'a> {
     #[zenoh(size = remain)]
     pub payload: &'a [u8],
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct MultiLinkSyn<'a> {
     #[zenoh(size = remain)]
     pub payload: &'a [u8],
 }
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct HasMultiLinkAck {}
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct HasLowLatency {}
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct HasCompression {}
 
-#[derive(ZExt, Debug, PartialEq, Default)]
+#[derive(ZExt, Debug, PartialEq, Default, Clone)]
 pub struct Patch {
     pub int: u8,
 }

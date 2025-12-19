@@ -1,6 +1,6 @@
 use crate::{exts::*, fields::*, msgs::*, *};
 
-#[derive(ZEnum, Debug, PartialEq)]
+#[derive(ZEnum, Debug, PartialEq, Clone)]
 pub enum ResponseBody<'a> {
     Err(Err<'a>),
     Reply(Reply<'a>),
@@ -12,7 +12,7 @@ impl Default for ResponseBody<'_> {
     }
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|M|N|ID:5=0x1b")]
 pub struct Response<'a> {
     pub rid: u32,
@@ -30,7 +30,7 @@ pub struct Response<'a> {
     pub payload: ResponseBody<'a>,
 }
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "Z|_:2|ID:5=0x1a")]
 pub struct ResponseFinal {
     pub rid: u32,

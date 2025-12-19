@@ -3,7 +3,7 @@ use crate::{
         ZCallbacks, ZChannels, ZConfig,
         driver::{Driver, DriverRx, DriverTx},
     },
-    io::transport::{Transport, TransportConfig},
+    io::transport::{TransportLink, TransportLinkConfig},
 };
 
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
@@ -41,7 +41,7 @@ pub struct Resources<'r, Config>
 where
     Config: ZConfig,
 {
-    transport: Option<Transport<Config::Platform>>,
+    transport: Option<TransportLink<Config::Platform>>,
     driver: Option<Driver<'r, Config>>,
 
     session: SessionResources<Config>,
@@ -87,8 +87,8 @@ where
     pub(crate) fn init(
         &'r mut self,
         config: Config,
-        transport: Transport<Config::Platform>,
-        tconfig: TransportConfig,
+        transport: TransportLink<Config::Platform>,
+        tconfig: TransportLinkConfig,
     ) -> (&'r Driver<'r, Config>, &'r SessionResources<Config>) {
         let Self {
             transport: t,

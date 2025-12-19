@@ -1,6 +1,6 @@
 use crate::*;
 
-#[derive(ZStruct, Debug, PartialEq, Default)]
+#[derive(ZStruct, Debug, PartialEq, Default, Clone)]
 #[zenoh(header = "_:2|S|ID:5=0x03")]
 pub struct Close {
     pub reason: u8,

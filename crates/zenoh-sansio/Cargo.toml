@@ -13,11 +13,18 @@ readme.workspace = true
 
 [features]
 default = []
-log = ["zenoh-proto/log"]
+
+std = []
+alloc = []
+
+log = ["std", "zenoh-proto/log"]
 defmt = ["zenoh-proto/defmt"]
-web_console = ["zenoh-proto/web_console"] # Use `web-sys` crate for logging in webassembly
+web_console = ["std", "zenoh-proto/web_console"]
 
 [dependencies]
 zenoh-proto.workspace = true
 sha3.workspace = true
 heapless.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.48.0", features = ["full"] }

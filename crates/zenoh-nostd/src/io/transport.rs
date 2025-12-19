@@ -10,7 +10,7 @@ use crate::{
 pub mod establishment;
 
 #[derive(Clone)]
-pub struct TransportMineConfig {
+pub struct TransportLinkMineConfig {
     pub mine_zid: ZenohIdProto,
     pub mine_lease: Duration,
 
@@ -20,7 +20,7 @@ pub struct TransportMineConfig {
 
 #[allow(dead_code)]
 #[derive(Clone)]
-pub struct TransportOtherConfig {
+pub struct TransportLinkOtherConfig {
     pub other_whatami: WhatAmI,
     pub other_zid: ZenohIdProto,
     pub other_sn: u32,
@@ -29,7 +29,7 @@ pub struct TransportOtherConfig {
 
 #[allow(dead_code)]
 #[derive(Clone)]
-pub struct TransportNegociatedConfig {
+pub struct TransportLinkNegociatedConfig {
     pub mine_sn: u32,
 
     pub resolution: Resolution,
@@ -37,63 +37,66 @@ pub struct TransportNegociatedConfig {
 }
 
 #[derive(Clone)]
-pub struct TransportConfig {
-    pub mine_config: TransportMineConfig,
-    pub other_config: TransportOtherConfig,
-    pub negociated_config: TransportNegociatedConfig,
+pub struct TransportLinkConfig {
+    pub mine_config: TransportLinkMineConfig,
+    pub other_config: TransportLinkOtherConfig,
+    pub negociated_config: TransportLinkNegociatedConfig,
 }
 
-pub struct Transport<Platform>
+pub struct TransportLink<Platform>
 where
     Platform: ZPlatform,
 {
     link: Link<Platform>,
 }
 
-impl<Platform> Transport<Platform>
+impl<Platform> TransportLink<Platform>
 where
     Platform: ZPlatform,
 {
     pub async fn open(
         link: Link<Platform>,
-        config: TransportMineConfig,
+        config: TransportLinkMineConfig,
         tx: &mut impl AsMut<[u8]>,
         rx: &mut impl AsMut<[u8]>,
-    ) -> core::result::Result<(Self, TransportConfig), crate::TransportError> {
+    ) -> core::result::Result<(Self, TransportLinkConfig), crate::TransportLinkError> {
         match select(Timer::after(config.open_timeout), async {
             establishment::open::open_link(link, config, tx, rx).await
         })
         .await
         {
             embassy_futures::select::Either::First(_) => {
-                zbail!(crate::TransportError::OpenTimeout);
+                zbail!(crate::TransportLinkError::OpenTimeout);
             }
             embassy_futures::select::Either::Second(res) => res,
         }
     }
 
-    pub fn split(&mut self) -> (TransportTx<'_, Platform>, TransportRx<'_, Platform>) {
+    pub fn split(&mut self) -> (TransportLinkTx<'_, Platform>, TransportLinkRx<'_, Platform>) {
         let (link_tx, link_rx) = self.link.split();
 
-        (TransportTx { tx: link_tx }, TransportRx { rx: link_rx })
+        (
+            TransportLinkTx { tx: link_tx },
+            TransportLinkRx { rx: link_rx },
+        )
     }
 }
 
-pub struct TransportTx<'a, Platform>
+pub struct TransportLinkTx<'a, Platform>
 where
     Platform: ZPlatform,
 {
     tx: LinkTx<'a, Platform>,
 }
 
-pub struct TransportRx<'a, Platform>
+pub struct TransportLinkRx<'a, Platform>
 where
     Platform: ZPlatform,
 {
     rx: LinkRx<'a, Platform>,
 }
 
-pub trait ZTransportTx {
+pub trait ZTransportLinkTx {
     fn tx(&mut self) -> &mut impl ZLinkTx;
 
     fn send(
@@ -103,7 +106,8 @@ pub trait ZTransportTx {
         mut writer: impl FnMut(
             &mut BatchWriter<&mut [u8]>,
         ) -> core::result::Result<(), crate::CodecError>,
-    ) -> impl core::future::Future<Output = core::result::Result<(), crate::TransportError>> {
+    ) -> impl core::future::Future<Output = core::result::Result<(), crate::TransportLinkError>>
+    {
         let (mut batch, space) = if self.tx().is_streamed() {
             let space = u16::MIN.to_le_bytes();
             tx[..space.len()].copy_from_slice(&space);
@@ -133,13 +137,13 @@ pub trait ZTransportTx {
     }
 }
 
-pub trait ZTransportRx {
+pub trait ZTransportLinkRx {
     fn rx(&mut self) -> &mut impl ZLinkRx;
 
     fn recv<'a>(
         &mut self,
         rx: &'a mut [u8],
-    ) -> impl core::future::Future<Output = core::result::Result<&'a [u8], crate::TransportError>>
+    ) -> impl core::future::Future<Output = core::result::Result<&'a [u8], crate::TransportLinkError>>
     {
         async move {
             let n = if self.rx().is_streamed() {
@@ -161,7 +165,7 @@ pub trait ZTransportRx {
     }
 }
 
-impl<Platform> ZTransportTx for TransportTx<'_, Platform>
+impl<Platform> ZTransportLinkTx for TransportLinkTx<'_, Platform>
 where
     Platform: ZPlatform,
 {
@@ -170,7 +174,7 @@ where
     }
 }
 
-impl<Platform> ZTransportRx for TransportRx<'_, Platform>
+impl<Platform> ZTransportLinkRx for TransportLinkRx<'_, Platform>
 where
     Platform: ZPlatform,
 {
@@ -179,7 +183,7 @@ where
     }
 }
 
-impl<Platform> ZTransportTx for Transport<Platform>
+impl<Platform> ZTransportLinkTx for TransportLink<Platform>
 where
     Platform: ZPlatform,
 {
@@ -188,7 +192,7 @@ where
     }
 }
 
-impl<Platform> ZTransportRx for Transport<Platform>
+impl<Platform> ZTransportLinkRx for TransportLink<Platform>
 where
     Platform: ZPlatform,
 {
