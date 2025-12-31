@@ -56,19 +56,16 @@ fn transport_codec() {
         msgs
     };
 
-    let mut socket = [0u8; MAX_PAYLOAD_SIZE * NUM_ITER];
-    let mut writer = &mut socket[..];
-
     let mut transport = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).codec();
 
-    for chunk in transport.tx.batch(messages.clone().into_iter()) {
-        writer[..chunk.len()].copy_from_slice(chunk);
-        let (_, remain) = writer.split_at_mut(chunk.len());
-        writer = remain;
+    for msg in &messages {
+        if transport.tx.push(msg).is_err() {
+            panic!("Transport too small");
+        }
     }
 
-    let len = MAX_PAYLOAD_SIZE * NUM_ITER - writer.len();
-    transport.rx.feed(&socket[..len]);
+    let bytes = transport.tx.flush().expect("There should be bytes!");
+    transport.rx.feed(bytes).expect("Transport too small");
 
     for msg in transport.rx.flush(&mut transport.state) {
         let actual = messages.pop_front().unwrap();

@@ -41,9 +41,9 @@ pub(crate) enum State {
 #[derive(Debug, PartialEq)]
 pub struct TransportState {
     zid: ZenohIdProto,
-    pub batch_size: u16,
+    pub(crate) batch_size: u16,
     resolution: Resolution,
-    lease: Duration,
+    pub(crate) lease: Duration,
     sn: u32,
 
     pub(crate) inner: State,

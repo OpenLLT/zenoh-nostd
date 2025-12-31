@@ -42,7 +42,7 @@ impl<Buff> TransportTx<Buff> {
 
     fn push_internal(
         streamed: bool,
-        batch_size: usize,
+        batch_size: u16,
         cursor: &mut usize,
         buffer: &mut [u8],
         last_reliability: &mut Option<Reliability>,
@@ -80,55 +80,48 @@ impl<Buff> TransportTx<Buff> {
     where
         Buff: AsMut<[u8]>,
     {
-        let batch_size = core::cmp::min(self.batch_size as usize, self.tx.as_mut().len());
-        let mut buffer = &mut self.tx.as_mut()[self.cursor..batch_size];
+        Self::push_internal(
+            self.streamed,
+            self.batch_size,
+            &mut self.cursor,
+            self.tx.as_mut(),
+            &mut self.last_reliability,
+            &mut self.last_qos,
+            &mut self.next_sn,
+            msg,
+        )
+    }
 
-        if self.cursor == 0 {
-            if self.streamed {
-                if buffer.len() < 2 {
-                    crate::zbail!(@log TransportError::TransportIsFull);
-                }
+    fn flush_internal<'a>(
+        streamed: bool,
+        cursor: &mut usize,
+        buffer: &'a mut [u8],
+    ) -> Option<&'a [u8]> {
+        let buffer = &mut buffer[..*cursor];
 
-                buffer = &mut buffer[2..];
-                self.cursor += 2;
+        if streamed {
+            if *cursor <= 2 {
+                return None;
             }
+
+            let length = (*cursor - 2) as u16;
+            let length = length.to_le_bytes();
+            buffer[..2].copy_from_slice(&length);
         }
 
-        let reliability = &mut self.last_reliability;
-        let qos = &mut self.last_qos;
-        let sn = &mut self.next_sn;
-
-        let start = buffer.len();
-        if msg.z_encode(&mut buffer, reliability, qos, sn).is_err() {
-            crate::zbail!(@log TransportError::MessageTooLargeForBatch)
+        if *cursor == 0 {
+            return None;
         }
 
-        self.cursor += start - buffer.len();
-        Ok(())
+        *cursor = 0;
+        Some(buffer)
     }
 
     pub fn flush(&mut self) -> Option<&'_ [u8]>
     where
         Buff: AsMut<[u8]>,
     {
-        let buffer = &mut self.tx.as_mut()[..self.cursor];
-
-        if self.streamed {
-            if self.cursor <= 2 {
-                return None;
-            }
-
-            let length = (self.cursor - 2) as u16;
-            let length = length.to_le_bytes();
-            buffer[..2].copy_from_slice(&length);
-        }
-
-        if self.cursor == 0 {
-            return None;
-        }
-
-        self.cursor = 0;
-        Some(buffer)
+        Self::flush_internal(self.streamed, &mut self.cursor, self.tx.as_mut())
     }
 
     pub fn batch<'a, 'b>(
@@ -138,61 +131,41 @@ impl<Buff> TransportTx<Buff> {
     where
         Buff: AsMut<[u8]>,
     {
+        let streamed = self.streamed;
+        let batch_size = core::cmp::min(self.batch_size as usize, self.tx.as_mut().len());
+        let cursor = &mut self.cursor;
+        let mut buffer = &mut self.tx.as_mut()[*cursor..batch_size];
+
         let mut msgs = msgs.peekable();
 
+        let reliability = &mut self.last_reliability;
+        let qos = &mut self.last_qos;
+        let sn = &mut self.next_sn;
+
         core::iter::from_fn(move || {
-            let _ = 3;
+            let batch_size = core::cmp::min(batch_size as usize, buffer.len());
+            let buffer = core::mem::take(&mut buffer);
 
-            while let Some(msg) = msgs.peek() {}
+            while let Some(msg) = msgs.peek() {
+                if Self::push_internal(
+                    streamed,
+                    batch_size as u16,
+                    cursor,
+                    buffer,
+                    reliability,
+                    qos,
+                    sn,
+                    &msg,
+                )
+                .is_err()
+                {
+                    break;
+                }
 
-            self.flush()
+                msgs.next();
+            }
+
+            Self::flush_internal(streamed, cursor, buffer)
         })
-
-        // let streamed = self.streamed;
-        // let mut buffer = self.tx.as_mut();
-        // let batch_size = core::cmp::min(self.batch_size as usize, buffer.len());
-
-        // let mut msgs = msgs.peekable();
-
-        // let reliability = &mut self.last_reliability;
-        // let qos = &mut self.last_qos;
-        // let sn = &mut self.next_sn;
-
-        // core::iter::from_fn(move || {
-        //     let batch_size = core::cmp::min(batch_size as usize, buffer.len());
-        //     let batch = &mut buffer[..batch_size];
-
-        //     if streamed && batch_size < 2 {
-        //         return None;
-        //     }
-
-        //     let mut writer = &mut batch[if streamed { 2 } else { 0 }..];
-        //     let start = writer.len();
-
-        //     let mut length = 0;
-        //     while let Some(msg) = msgs.peek() {
-        //         if msg.z_encode(&mut writer, reliability, qos, sn).is_ok() {
-        //             length = start - writer.len();
-        //             msgs.next();
-        //         } else {
-        //             break;
-        //         }
-        //     }
-
-        //     if length == 0 {
-        //         return None;
-        //     }
-
-        //     if streamed {
-        //         let l = (length as u16).to_be_bytes();
-        //         batch[..2].copy_from_slice(&l);
-        //     }
-
-        //     let (ret, remain) =
-        //         core::mem::take(&mut buffer).split_at_mut(length + if streamed { 2 } else { 0 });
-        //     buffer = remain;
-
-        //     Some(&ret[..])
-        // })
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    ZReadable,
+    TransportError, ZReadable,
     msgs::*,
     transport::state::{State, StateRequest, TransportState},
 };
@@ -35,47 +35,57 @@ impl<Buff> TransportRx<Buff> {
         self
     }
 
-    pub fn feed(&mut self, data: &[u8])
+    pub fn feed(&mut self, data: &[u8]) -> core::result::Result<(), TransportError>
     where
         Buff: AsMut<[u8]>,
     {
         let rx = self.rx.as_mut();
         let rx = &mut rx[self.cursor..];
 
-        let len = data.len().min(rx.len());
+        let len = data.len();
+        if len > rx.len() {
+            crate::zbail!(@log TransportError::TransportTooSmall);
+        }
         rx[..len].copy_from_slice(&data[..len]);
         self.cursor += len;
+        Ok(())
     }
 
-    pub fn feed_exact(&mut self, len: usize, mut data: impl FnMut(&mut [u8]))
+    pub fn feed_exact(
+        &mut self,
+        len: usize,
+        mut data: impl FnMut(&mut [u8]),
+    ) -> core::result::Result<(), TransportError>
     where
         Buff: AsMut<[u8]>,
     {
         let rx = self.rx.as_mut();
         let rx = &mut rx[self.cursor..];
 
-        let len = len.min(rx.len());
+        if len > rx.len() {
+            crate::zbail!(@log TransportError::TransportTooSmall);
+        }
         data(&mut rx[..len]);
         self.cursor += len;
+        Ok(())
     }
 
-    pub fn feed_with(&mut self, mut data: impl FnMut(&mut [u8]) -> usize)
+    pub fn feed_stream(&mut self, mut data: impl FnMut(&mut [u8]))
     where
         Buff: AsMut<[u8]>,
     {
         let rx = self.rx.as_mut();
         let rx = &mut rx[self.cursor..];
 
-        if self.streamed {
-            let mut lbuf = [0u8; 2];
-            data(&mut lbuf);
-            let l = u16::from_be_bytes(lbuf) as usize;
-            data(&mut rx[..l]);
-            self.cursor += l;
-        } else {
-            let l = data(&mut rx[..]);
-            self.cursor += l;
+        if !self.streamed {
+            return;
         }
+
+        let mut lbuf = [0u8; 2];
+        data(&mut lbuf);
+        let l = u16::from_le_bytes(lbuf) as usize;
+        data(&mut rx[..l]);
+        self.cursor += l;
     }
 
     fn read_one<'a>(

@@ -36,7 +36,21 @@ pub struct TransportTxScoped<'a, Buff> {
 }
 
 impl<Buff> TransportTxScoped<'_, Buff> {
-    pub fn write<'a, 'b>(
+    pub fn push(&mut self, msg: &NetworkMessage) -> core::result::Result<(), TransportError>
+    where
+        Buff: AsMut<[u8]>,
+    {
+        self.tx.push(msg)
+    }
+
+    pub fn flush(&mut self) -> Option<&'_ [u8]>
+    where
+        Buff: AsMut<[u8]>,
+    {
+        self.tx.flush()
+    }
+
+    pub fn batch<'a, 'b>(
         &'a mut self,
         msgs: impl Iterator<Item = NetworkMessage<'b>>,
     ) -> impl Iterator<Item = &'a [u8]>
@@ -96,24 +110,28 @@ pub struct TransportRxScoped<'a, Buff> {
 }
 
 impl<Buff> TransportRxScoped<'_, Buff> {
-    pub fn feed(&mut self, data: &[u8])
+    pub fn feed(&mut self, data: &[u8]) -> core::result::Result<(), TransportError>
     where
         Buff: AsMut<[u8]>,
     {
-        self.rx.feed(data);
+        self.rx.feed(data)
     }
-    pub fn feed_exact(&mut self, len: usize, data: impl FnMut(&mut [u8]))
+    pub fn feed_exact(
+        &mut self,
+        len: usize,
+        data: impl FnMut(&mut [u8]),
+    ) -> core::result::Result<(), TransportError>
     where
         Buff: AsMut<[u8]>,
     {
-        self.rx.feed_exact(len, data);
+        self.rx.feed_exact(len, data)
     }
 
-    pub fn feed_with(&mut self, data: impl FnMut(&mut [u8]) -> usize)
+    pub fn feed_stream(&mut self, data: impl FnMut(&mut [u8]))
     where
         Buff: AsMut<[u8]>,
     {
-        self.rx.feed_with(data);
+        self.rx.feed_stream(data)
     }
 
     fn read_one<'a>(

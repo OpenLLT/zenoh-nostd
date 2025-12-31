@@ -130,7 +130,11 @@ crate::declare_zerror! {
     enum TransportError: CodecError {
         #[doc = "TransportIsFull."]
         #[err = "transport is full"]
-        TransportIsFull = 55,
+        TransportIsFull = 54,
+
+        #[doc = "Transport is too small to receive this data."]
+        #[err = "transport is too small"]
+        TransportTooSmall = 55,
 
         #[doc = "Message too large for a batch."]
         #[err = "message too large for a batch"]

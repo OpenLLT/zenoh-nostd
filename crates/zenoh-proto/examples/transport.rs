@@ -24,7 +24,7 @@ fn main() {
         let mut scope = transport.scope();
 
         // Feed the RX side with some bytes. See also `feed_with`.
-        scope.rx.feed(&[1, 2, 3, 4, 5]);
+        scope.rx.feed(&[1, 2, 3, 4, 5]).ok();
 
         // Flush the RX buffer.
         // This consumes all available bytes and returns them as an iterator of `NetworkMessage`.
@@ -37,7 +37,7 @@ fn main() {
 
         // Consume the response and write it to the TX side.
         // The iterator yields chunks of bytes with a maximum size of `batch_size`.
-        for bytes in scope.tx.write(session_resp) {
+        for bytes in scope.tx.batch(session_resp) {
             println!("Sending {:?}", bytes);
         }
 

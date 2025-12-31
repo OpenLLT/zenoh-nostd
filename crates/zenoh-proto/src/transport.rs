@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use crate::transport::{rx::TransportRx, state::TransportState, tx::TransportTx};
 
 mod scope;
@@ -53,6 +55,11 @@ impl<Buff> Transport<Buff> {
         self
     }
 
+    pub fn lease(mut self, lease: Duration) -> Self {
+        self.state.lease = lease;
+        self
+    }
+
     pub fn opened(&self) -> bool {
         self.state.opened()
     }
@@ -66,7 +73,7 @@ pub fn const_array_dumb_handshake<const N: usize>(
     fn step<const N: usize>(transport: &mut Transport<[u8; N]>, socket: (&mut [u8], &mut usize)) {
         let mut scope = transport.scope();
 
-        scope.rx.feed(&socket.0[..*socket.1]);
+        scope.rx.feed(&socket.0[..*socket.1]).ok();
         for _ in scope.rx.flush(&mut scope.state) {}
 
         if let Some(i) = scope.tx.interact(&mut scope.state) {

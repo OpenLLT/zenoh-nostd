@@ -14,17 +14,18 @@ use zenoh_proto::{
 
 fn handle_client(mut stream: std::net::TcpStream) {
     let mut transport = Transport::new([0; u16::MAX as usize]).listen().streamed();
-
+    println!("Starting handshake...");
     // Handshake
     for _ in 0..2 {
         let mut scope = transport.scope();
 
-        scope.rx.feed_with(|data| {
+        scope.rx.feed_stream(|data| {
             // In streamed mode we can just `read_exact`. Internally it will call this closure
             // twice, the first one to retrieve the length and the second one to retrieve the rest
             // of the data.
+            println!("Awaiting {} bytes", data.len());
             stream.read_exact(data).expect("Couldn't raed");
-            0
+            println!("Received {:?}", data)
         });
 
         for _ in scope.rx.flush(&mut scope.state) {}
@@ -34,43 +35,38 @@ fn handle_client(mut stream: std::net::TcpStream) {
             .interact(&mut scope.state)
             .expect("During listen handshake there should always be a response");
 
+        println!("Sending bytes {:?}", bytes);
         stream.write_all(bytes).expect("Couldn't write");
     }
 
     assert!(transport.opened());
+    println!("Handshake passed!");
 
     // Just send messages indefinitely
-    let put = Push {
-        wire_expr: WireExpr::from(keyexpr::from_str_unchecked("test/thr")),
-        payload: PushBody::Put(Put {
-            payload: &[0, 1, 2, 3, 4, 5, 6, 7],
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    let batch = core::array::from_fn::<_, 200, _>(|_| NetworkMessage {
+    let put = NetworkMessage {
         reliability: Reliability::default(),
         qos: QoS::default(),
-        body: NetworkBody::Push(put.clone()),
-    });
+        body: NetworkBody::Push(Push {
+            wire_expr: WireExpr::from(keyexpr::from_str_unchecked("test/thr")),
+            payload: PushBody::Put(Put {
+                payload: &[0, 1, 2, 3, 4, 5, 6, 7],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    };
 
-    // let mut batch = BatchWriter::new(&mut tx[2..], 0);
-    // for _ in 0..200 {
-    //     batch
-    //         .framed(&put, Reliability::Reliable, QoS::default())
-    //         .expect("Could not encode Push");
-    // }
+    for _ in 0..200 {
+        transport.tx.push(&put).expect("Transport too small");
+    }
 
-    // let (_, payload_len) = batch.finalize();
-    // let len_bytes = (payload_len as u16).to_le_bytes();
-    // tx[..2].copy_from_slice(&len_bytes);
+    let bytes = transport.tx.flush().unwrap();
 
-    // loop {
-    //     if stream.write_all(&tx[..payload_len + 2]).is_err() {
-    //         break;
-    //     }
-    // }
+    loop {
+        if stream.write_all(&bytes).is_err() {
+            break;
+        }
+    }
 }
 
 fn main() {
