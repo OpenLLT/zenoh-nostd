@@ -1,10 +1,9 @@
-use std::u16;
-
 use crate::{
+    ZEncode,
     exts::QoS,
     fields::Reliability,
     msgs::NetworkMessage,
-    transport::state::{StateResponse, TransportState},
+    transport::{scope::TransportStateScoped, state::TransportState},
 };
 
 #[derive(Debug)]
@@ -12,7 +11,7 @@ pub struct TransportTx<Buff> {
     pub(crate) streamed: bool,
     tx: Buff,
 
-    last_batch_size: u16,
+    batch_size: u16,
     next_sn: u32,
 
     last_qos: Option<QoS>,
@@ -25,7 +24,7 @@ impl<Buff> TransportTx<Buff> {
         Buff: AsRef<[u8]>,
     {
         Self {
-            last_batch_size: tx.as_ref().len() as u16,
+            batch_size: tx.as_ref().len() as u16,
             tx,
             streamed: false,
             next_sn: 0,
@@ -51,7 +50,7 @@ impl<Buff> TransportTx<Buff> {
     {
         let streamed = self.streamed;
         let mut buffer = self.tx.as_mut();
-        let batch_size = core::cmp::min(self.last_batch_size as usize, buffer.len());
+        let batch_size = core::cmp::min(self.batch_size as usize, buffer.len());
 
         let mut msgs = msgs.peekable();
 
@@ -95,5 +94,47 @@ impl<Buff> TransportTx<Buff> {
 
             Some(&ret[..])
         })
+    }
+
+    pub fn interact<'a>(&mut self, state: &mut TransportStateScoped<'a>) -> Option<&'_ [u8]>
+    where
+        Buff: AsMut<[u8]>,
+    {
+        if let Some(pending) = state.pending.take() {
+            let batch_size = core::cmp::min(self.batch_size as usize, self.tx.as_mut().len());
+            let batch = &mut self.tx.as_mut()[..batch_size];
+
+            if self.streamed && batch_size < 2 {
+                return None;
+            }
+
+            let mut writer = &mut batch[if self.streamed { 2 } else { 0 }..];
+            let start = writer.len();
+
+            let length = if pending.0.z_encode(&mut writer).is_ok() {
+                start - writer.len()
+            } else {
+                crate::error!("Couldn't encode msg {:?}", pending.0);
+                return None;
+            };
+
+            if length == 0 {
+                return None;
+            }
+
+            if self.streamed {
+                let l = (length as u16).to_be_bytes();
+                batch[..2].copy_from_slice(&l);
+            }
+
+            let (ret, _) = self
+                .tx
+                .as_mut()
+                .split_at(length + if self.streamed { 2 } else { 0 });
+
+            Some(&ret[..])
+        } else {
+            None
+        }
     }
 }

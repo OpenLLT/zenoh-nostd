@@ -41,7 +41,7 @@ pub(crate) enum State {
 #[derive(Debug, PartialEq)]
 pub(crate) struct TransportState {
     zid: ZenohIdProto,
-    batch_size: u16,
+    pub batch_size: u16,
     resolution: Resolution,
     lease: Duration,
     sn: u32,
@@ -68,6 +68,7 @@ pub(crate) struct StateRequest<'a>(pub TransportMessage<'a>);
 #[derive(Debug, PartialEq)]
 pub(crate) struct StateResponse<'a>(pub TransportMessage<'a>);
 
+#[allow(unused)]
 impl TransportState {
     pub fn codec() -> Self {
         Self {

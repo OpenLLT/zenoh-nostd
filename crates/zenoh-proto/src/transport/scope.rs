@@ -10,7 +10,7 @@ use crate::{
 #[derive(Debug)]
 pub struct TransportStateScoped<'a> {
     state: &'a mut TransportState,
-    pending: Option<StateResponse<'a>>,
+    pub(crate) pending: Option<StateResponse<'a>>,
 }
 
 impl<'a> TransportStateScoped<'a> {

@@ -197,6 +197,12 @@ impl<Buff> TransportRx<Buff> {
         let mut reader = &rx[..self.cursor];
         let frame = &mut self.frame;
 
+        if reader.is_empty() {
+            if let Err(e) = state.process(None) {
+                crate::error!("Error in the Transport State Machine: {}", e);
+            }
+        }
+
         core::iter::from_fn(move || Self::read_one(&mut reader, state, frame))
     }
 }

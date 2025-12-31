@@ -162,18 +162,18 @@ fn transport_codec() {
     let mut writer = &mut socket[..];
 
     let mut transport = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).codec();
-    let mut local = transport.state.local().expect("Incorrect state");
+    let mut scope = transport.scope();
 
-    for chunk in transport.tx.write(messages.clone().into_iter()) {
+    for chunk in scope.tx.write(messages.clone().into_iter()) {
         writer[..chunk.len()].copy_from_slice(chunk);
         let (_, remain) = writer.split_at_mut(chunk.len());
         writer = remain;
     }
 
     let len = MAX_PAYLOAD_SIZE * NUM_ITER - writer.len();
-    transport.rx.feed(&mut local, &socket[..len]);
+    scope.rx.feed(&socket[..len]);
 
-    for msg in transport.rx.flush(&mut local) {
+    for msg in scope.rx.flush(&mut scope.state) {
         let actual = messages.pop_front().unwrap();
         assert_eq!(msg, actual);
     }
@@ -183,22 +183,43 @@ fn transport_codec() {
 
 #[test]
 fn transport_handshake() {
-    let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).listen();
-    let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).connect();
+    let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).connect();
+    let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).listen();
 
-    fn step<const N: usize>(t: &mut Transport<[u8; N]>, socket: &mut [u8]) {
-        let mut l = t.state.local().expect("Incorrect state");
-        t.rx.feed(&mut l, socket);
-        for _ in t.rx.flush(&mut l) {}
-        let i = t.tx.interact(&mut l);
-        socket[..i.len()].copy_from_slice(i);
+    fn step<const N: usize>(transport: &mut Transport<[u8; N]>, socket: (&mut [u8], &mut usize)) {
+        let mut scope = transport.scope();
+
+        scope.rx.feed(&socket.0[..*socket.1]);
+        for _ in scope.rx.flush(&mut scope.state) {}
+
+        if let Some(i) = scope.tx.interact(&mut scope.state) {
+            socket.0[..i.len()].copy_from_slice(i);
+            *socket.1 = i.len();
+        }
     }
 
     let mut socket = [0u8; MAX_PAYLOAD_SIZE * NUM_ITER];
+    let mut length = 0;
     for _ in 0..2 {
-        step(&mut t1, &mut socket);
-        step(&mut t2, &mut socket);
+        step(&mut t1, (&mut socket, &mut length));
+        step(&mut t2, (&mut socket, &mut length));
     }
 
-    assert!(t1.state.is_opened() && t2.state.is_opened());
+    step(&mut t1, (&mut socket, &mut length));
+
+    assert!(t1.opened() && t2.opened());
+
+    let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).listen();
+    let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).connect();
+
+    let mut socket = [0u8; MAX_PAYLOAD_SIZE * NUM_ITER];
+    let mut length = 0;
+    for _ in 0..3 {
+        step(&mut t1, (&mut socket, &mut length));
+        step(&mut t2, (&mut socket, &mut length));
+    }
+
+    step(&mut t1, (&mut socket, &mut length));
+
+    assert!(t1.opened() && t2.opened());
 }
