@@ -61,7 +61,7 @@ fn transport_codec() {
 
     let mut transport = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).codec();
 
-    for chunk in transport.tx.write(messages.clone().into_iter()) {
+    for chunk in transport.tx.batch(messages.clone().into_iter()) {
         writer[..chunk.len()].copy_from_slice(chunk);
         let (_, remain) = writer.split_at_mut(chunk.len());
         writer = remain;

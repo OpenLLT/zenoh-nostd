@@ -43,7 +43,7 @@ impl<Buff> TransportTxScoped<'_, Buff> {
     where
         Buff: AsMut<[u8]>,
     {
-        self.tx.write(msgs)
+        self.tx.batch(msgs)
     }
 
     pub fn interact<'a>(&mut self, state: &mut TransportStateScoped<'a>) -> Option<&'_ [u8]>
