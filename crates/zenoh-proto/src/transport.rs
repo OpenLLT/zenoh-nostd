@@ -1,6 +1,9 @@
 use core::time::Duration;
 
-use crate::transport::{rx::TransportRx, state::TransportState, tx::TransportTx};
+use crate::{
+    fields::ZenohIdProto,
+    transport::{rx::TransportRx, state::TransportState, tx::TransportTx},
+};
 
 mod scope;
 mod state;
@@ -46,6 +49,11 @@ impl<Buff> Transport<Buff> {
 
     pub fn batch_size(mut self, batch_size: u16) -> Self {
         self.state.batch_size = self.state.batch_size.min(batch_size);
+        self
+    }
+
+    pub fn zid(mut self, zid: ZenohIdProto) -> Self {
+        self.state = self.state.with_zid(zid);
         self
     }
 

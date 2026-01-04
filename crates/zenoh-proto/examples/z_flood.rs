@@ -1,7 +1,6 @@
 use std::{
     io::{Read, Write},
-    net::TcpListener,
-    time::Duration,
+    net::{TcpListener, TcpStream},
 };
 
 use zenoh_proto::{
@@ -12,37 +11,63 @@ use zenoh_proto::{
     msgs::*,
 };
 
-fn handle_client(mut stream: std::net::TcpStream) {
-    let mut transport = Transport::new([0; u16::MAX as usize]).listen().streamed();
-    println!("Starting handshake...");
-    // Handshake
+const BATCH_SIZE: usize = u16::MAX as usize;
+
+fn open_listen(stream: &mut std::net::TcpStream) -> Transport<[u8; BATCH_SIZE]> {
+    let mut transport = Transport::new([0u8; BATCH_SIZE]).streamed().listen();
+
     for _ in 0..2 {
         let mut scope = transport.scope();
 
-        scope.rx.feed_stream(|data| {
-            // In streamed mode we can just `read_exact`. Internally it will call this closure
-            // twice, the first one to retrieve the length and the second one to retrieve the rest
-            // of the data.
-            println!("Awaiting {} bytes", data.len());
-            stream.read_exact(data).expect("Couldn't raed");
-            println!("Received {:?}", data)
-        });
+        if scope
+            .rx
+            .feed_with(|data| stream.read_exact(data).map_or(0, |_| data.len()))
+            .is_err()
+        {
+            continue;
+        }
 
         for _ in scope.rx.flush(&mut scope.state) {}
 
-        let bytes = scope
-            .tx
-            .interact(&mut scope.state)
-            .expect("During listen handshake there should always be a response");
-
-        println!("Sending bytes {:?}", bytes);
-        stream.write_all(bytes).expect("Couldn't write");
+        if let Some(bytes) = scope.tx.interact(&mut scope.state) {
+            stream.write_all(bytes).ok();
+        }
     }
 
-    assert!(transport.opened());
-    println!("Handshake passed!");
+    transport
+}
 
-    // Just send messages indefinitely
+fn open_connect(stream: &mut std::net::TcpStream) -> Transport<[u8; BATCH_SIZE]> {
+    let mut transport = Transport::new([0u8; BATCH_SIZE]).streamed().connect();
+
+    for i in 0..3 {
+        let mut scope = transport.scope();
+
+        if i == 0 {
+            for _ in scope.rx.flush(&mut scope.state) {}
+        } else {
+            if scope
+                .rx
+                .feed_with(|data| stream.read_exact(data).map_or(0, |_| data.len()))
+                .is_err()
+            {
+                continue;
+            }
+
+            for _ in scope.rx.flush(&mut scope.state) {}
+        }
+
+        if let Some(bytes) = scope.tx.interact(&mut scope.state) {
+            stream.write_all(bytes).ok();
+        }
+    }
+
+    transport
+}
+
+fn handle_client(mut stream: std::net::TcpStream, mut transport: Transport<[u8; BATCH_SIZE]>) {
+    assert!(transport.opened());
+
     let put = NetworkMessage {
         reliability: Reliability::default(),
         qos: QoS::default(),
@@ -62,6 +87,7 @@ fn handle_client(mut stream: std::net::TcpStream) {
 
     let bytes = transport.tx.flush().unwrap();
 
+    println!("Sending indefinitely to {:?}...", stream.peer_addr());
     loop {
         if stream.write_all(&bytes).is_err() {
             break;
@@ -70,13 +96,44 @@ fn handle_client(mut stream: std::net::TcpStream) {
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7447").expect("Could not bind");
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => handle_client(stream),
-            Err(e) => {
-                panic!("Error accepting connection: {}", e);
+    match std::env::args().nth(1) {
+        None => {
+            let listener = TcpListener::bind("127.0.0.1:7447").expect("Could not bind");
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(mut stream) => {
+                        let transport = open_listen(&mut stream);
+                        handle_client(stream, transport)
+                    }
+                    Err(e) => {
+                        panic!("Error accepting connection: {}", e);
+                    }
+                }
             }
         }
+        Some(str) => match str.as_str() {
+            "--listen" => {
+                let listener = TcpListener::bind("127.0.0.1:7447").expect("Could not bind");
+                for stream in listener.incoming() {
+                    match stream {
+                        Ok(mut stream) => {
+                            let transport = open_listen(&mut stream);
+                            handle_client(stream, transport)
+                        }
+                        Err(e) => {
+                            panic!("Error accepting connection: {}", e);
+                        }
+                    }
+                }
+            }
+            "--connect" => {
+                let mut stream = TcpStream::connect("127.0.0.1:7447").expect("Couldn't connect");
+                let transport = open_connect(&mut stream);
+                handle_client(stream, transport)
+            }
+            _ => {
+                panic!("Invalid argument")
+            }
+        },
     }
 }

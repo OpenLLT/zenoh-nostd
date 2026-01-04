@@ -87,7 +87,7 @@ impl<Buff> TransportTxScoped<'_, Buff> {
             }
 
             if self.tx.streamed {
-                let l = (length as u16).to_be_bytes();
+                let l = (length as u16).to_le_bytes();
                 batch[..2].copy_from_slice(&l);
             }
 
@@ -116,22 +116,15 @@ impl<Buff> TransportRxScoped<'_, Buff> {
     {
         self.rx.feed(data)
     }
-    pub fn feed_exact(
+
+    pub fn feed_with(
         &mut self,
-        len: usize,
-        data: impl FnMut(&mut [u8]),
+        feed: impl FnMut(&mut [u8]) -> usize,
     ) -> core::result::Result<(), TransportError>
     where
         Buff: AsMut<[u8]>,
     {
-        self.rx.feed_exact(len, data)
-    }
-
-    pub fn feed_stream(&mut self, data: impl FnMut(&mut [u8]))
-    where
-        Buff: AsMut<[u8]>,
-    {
-        self.rx.feed_stream(data)
+        self.rx.feed_with(feed)
     }
 
     fn read_one<'a>(

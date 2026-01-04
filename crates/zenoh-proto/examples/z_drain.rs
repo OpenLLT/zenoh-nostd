@@ -1,90 +1,121 @@
 use std::{
     io::{Read, Write},
-    net::TcpListener,
-    time::Duration,
+    net::{TcpListener, TcpStream},
 };
 
-use zenoh_proto::{BatchReader, BatchWriter, msgs::*};
+use zenoh_proto::*;
 
-fn handle_client(mut stream: std::net::TcpStream) {
-    let mut rx = [0; u16::MAX as usize];
-    let mut tx = [0; u16::MAX as usize];
+const BATCH_SIZE: usize = u16::MAX as usize;
 
-    let mut len = [0; 2];
-    stream.read_exact(&mut len).expect("Could not read length");
-    let l = u16::from_le_bytes(len) as usize;
-    stream
-        .read_exact(&mut rx[..l])
-        .expect("Could not read InitSyn");
-    let mut batch = BatchReader::new(&rx[..l]);
-    let _ = loop {
-        match batch.next() {
-            Some(Message::Transport(TransportMessage::InitSyn(i))) => break i,
-            Some(_) => continue,
-            None => panic!("Did not receive InitSyn"),
+fn open_listen(stream: &mut std::net::TcpStream) -> Transport<[u8; BATCH_SIZE]> {
+    let mut transport = Transport::new([0u8; BATCH_SIZE])
+        .streamed()
+        .listen()
+        .lease(core::time::Duration::from_hours(1));
+
+    for _ in 0..2 {
+        let mut scope = transport.scope();
+
+        if scope
+            .rx
+            .feed_with(|data| stream.read_exact(data).map_or(0, |_| data.len()))
+            .is_err()
+        {
+            continue;
         }
-    };
 
-    let init_ack = InitAck::default();
-    let mut batch = BatchWriter::new(&mut tx[2..], 0);
-    batch.unframed(&init_ack).expect("Could not encode InitAck");
-    let (_, payload_len) = batch.finalize();
-    let len_bytes = (payload_len as u16).to_le_bytes();
-    tx[..2].copy_from_slice(&len_bytes);
-    stream
-        .write_all(&tx[..payload_len + 2])
-        .expect("Could not send InitAck");
+        for _ in scope.rx.flush(&mut scope.state) {}
 
-    let mut len = [0; 2];
-    stream.read_exact(&mut len).expect("Could not read length");
-    let l = u16::from_le_bytes(len) as usize;
-    stream
-        .read_exact(&mut rx[..l])
-        .expect("Could not read OpenSyn");
-    let mut batch = BatchReader::new(&rx[..l]);
-    let _ = loop {
-        match batch.next() {
-            Some(Message::OpenSyn(o)) => break o,
-            Some(_) => continue,
-            None => panic!("Did not receive OpenSyn"),
+        if let Some(bytes) = scope.tx.interact(&mut scope.state) {
+            stream.write_all(bytes).ok();
         }
-    };
+    }
 
-    let open_ack = OpenAck {
-        lease: Duration::from_secs(60),
-        ..Default::default()
-    };
-    let mut batch = BatchWriter::new(&mut tx[2..], 0);
-    batch.unframed(&open_ack).expect("Could not encode OpenAck");
-    let (_, payload_len) = batch.finalize();
-    let len_bytes = (payload_len as u16).to_le_bytes();
-    tx[..2].copy_from_slice(&len_bytes);
-    stream
-        .write_all(&tx[..payload_len + 2])
-        .expect("Could not send OpenAck");
+    transport
+}
 
-    // Just read messages indefinitely
+fn open_connect(stream: &mut std::net::TcpStream) -> Transport<[u8; BATCH_SIZE]> {
+    let mut transport = Transport::new([0u8; BATCH_SIZE])
+        .streamed()
+        .connect()
+        .lease(core::time::Duration::from_hours(1));
+
+    for i in 0..3 {
+        let mut scope = transport.scope();
+
+        if i == 0 {
+            for _ in scope.rx.flush(&mut scope.state) {}
+        } else {
+            if scope
+                .rx
+                .feed_with(|data| stream.read_exact(data).map_or(0, |_| data.len()))
+                .is_err()
+            {
+                continue;
+            }
+
+            for _ in scope.rx.flush(&mut scope.state) {}
+        }
+
+        if let Some(bytes) = scope.tx.interact(&mut scope.state) {
+            stream.write_all(bytes).ok();
+        }
+    }
+
+    transport
+}
+
+fn handle_client(mut stream: std::net::TcpStream, transport: Transport<[u8; BATCH_SIZE]>) {
+    assert!(transport.opened());
+
+    println!("Reading indefinitely from {:?}...", stream.peer_addr());
+    let mut rx = [0u8; u16::MAX as usize];
     loop {
-        let mut len = [0; 2];
-        if stream.read_exact(&mut len).is_err() {
-            break;
-        }
-
-        let l = u16::from_le_bytes(len) as usize;
-        if stream.read_exact(&mut rx[..l]).is_err() {
+        if stream.read_exact(&mut rx).is_err() {
             break;
         }
     }
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7447").expect("Could not bind");
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => handle_client(stream),
-            Err(e) => {
-                panic!("Error accepting connection: {}", e);
+    match std::env::args().nth(1) {
+        None => {
+            let listener = TcpListener::bind("127.0.0.1:7447").expect("Could not bind");
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(mut stream) => {
+                        let transport = open_listen(&mut stream);
+                        handle_client(stream, transport)
+                    }
+                    Err(e) => {
+                        panic!("Error accepting connection: {}", e);
+                    }
+                }
             }
         }
+        Some(str) => match str.as_str() {
+            "--listen" => {
+                let listener = TcpListener::bind("127.0.0.1:7447").expect("Could not bind");
+                for stream in listener.incoming() {
+                    match stream {
+                        Ok(mut stream) => {
+                            let transport = open_listen(&mut stream);
+                            handle_client(stream, transport)
+                        }
+                        Err(e) => {
+                            panic!("Error accepting connection: {}", e);
+                        }
+                    }
+                }
+            }
+            "--connect" => {
+                let mut stream = TcpStream::connect("127.0.0.1:7447").expect("Couldn't connect");
+                let transport = open_connect(&mut stream);
+                handle_client(stream, transport)
+            }
+            _ => {
+                panic!("Invalid argument")
+            }
+        },
     }
 }

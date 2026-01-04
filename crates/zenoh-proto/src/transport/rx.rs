@@ -42,19 +42,43 @@ impl<Buff> TransportRx<Buff> {
         let rx = self.rx.as_mut();
         let rx = &mut rx[self.cursor..];
 
-        let len = data.len();
-        if len > rx.len() {
-            crate::zbail!(@log TransportError::TransportTooSmall);
+        if self.streamed {
+            if data.len() == 0 {
+                return Ok(());
+            }
+
+            if data.len() < 2 {
+                crate::zbail!(@log TransportError::SrcIsTooSmall);
+            }
+
+            let mut len = [0u8; 2];
+            len.copy_from_slice(&data[..2]);
+            let len = u16::from_le_bytes(len) as usize;
+            if len > data.len() - 2 {
+                crate::zbail!(@log TransportError::SrcIsTooSmall);
+            }
+
+            if len > rx.len() {
+                crate::zbail!(@log TransportError::TransportTooSmall);
+            }
+            rx[..len].copy_from_slice(&data[2..][..len]);
+            self.cursor += len;
+        } else {
+            let len = data.len();
+            if len > rx.len() {
+                crate::zbail!(@log TransportError::TransportTooSmall);
+            }
+
+            rx[..len].copy_from_slice(&data[..len]);
+            self.cursor += len;
         }
-        rx[..len].copy_from_slice(&data[..len]);
-        self.cursor += len;
+
         Ok(())
     }
 
-    pub fn feed_exact(
+    pub fn feed_with(
         &mut self,
-        len: usize,
-        mut data: impl FnMut(&mut [u8]),
+        mut feed: impl FnMut(&mut [u8]) -> usize,
     ) -> core::result::Result<(), TransportError>
     where
         Buff: AsMut<[u8]>,
@@ -62,30 +86,28 @@ impl<Buff> TransportRx<Buff> {
         let rx = self.rx.as_mut();
         let rx = &mut rx[self.cursor..];
 
-        if len > rx.len() {
-            crate::zbail!(@log TransportError::TransportTooSmall);
+        if self.streamed {
+            if rx.len() < 2 {
+                crate::zbail!(@log TransportError::TransportTooSmall);
+            }
+
+            let mut len = [0u8; 2];
+            feed(&mut len);
+            let len = u16::from_le_bytes(len) as usize;
+            if len > rx.len() {
+                crate::zbail!(@log TransportError::TransportTooSmall);
+            }
+            feed(&mut rx[..len]);
+            self.cursor += len;
+        } else {
+            let len = feed(rx);
+            if len > rx.len() {
+                crate::zbail!(@log TransportError::TransportTooSmall);
+            }
+            self.cursor += len;
         }
-        data(&mut rx[..len]);
-        self.cursor += len;
+
         Ok(())
-    }
-
-    pub fn feed_stream(&mut self, mut data: impl FnMut(&mut [u8]))
-    where
-        Buff: AsMut<[u8]>,
-    {
-        let rx = self.rx.as_mut();
-        let rx = &mut rx[self.cursor..];
-
-        if !self.streamed {
-            return;
-        }
-
-        let mut lbuf = [0u8; 2];
-        data(&mut lbuf);
-        let l = u16::from_le_bytes(lbuf) as usize;
-        data(&mut rx[..l]);
-        self.cursor += l;
     }
 
     fn read_one<'a>(

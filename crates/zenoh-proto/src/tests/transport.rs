@@ -41,7 +41,7 @@ fn net_rand<'a>(w: &mut impl crate::ZStoreable<'a>) -> NetworkMessage<'a> {
 }
 
 #[test]
-fn transport_codec() {
+fn transport_codec_non_streamed() {
     extern crate std;
     use std::collections::VecDeque;
 
@@ -76,7 +76,44 @@ fn transport_codec() {
 }
 
 #[test]
-fn transport_handshake() {
+fn transport_codec_streamed() {
+    extern crate std;
+    use std::collections::VecDeque;
+
+    let mut rand = [0u8; MAX_PAYLOAD_SIZE * NUM_ITER];
+    let mut rw = rand.as_mut_slice();
+
+    let mut messages = {
+        let mut msgs = VecDeque::new();
+        for _ in 0..thread_rng().gen_range(1..16) {
+            msgs.push_back(net_rand(&mut rw));
+        }
+        msgs
+    };
+
+    let mut transport = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER])
+        .codec()
+        .streamed();
+
+    for msg in &messages {
+        if transport.tx.push(msg).is_err() {
+            panic!("Transport too small");
+        }
+    }
+
+    let bytes = transport.tx.flush().expect("There should be bytes!");
+    transport.rx.feed(bytes).expect("Transport too small");
+
+    for msg in transport.rx.flush(&mut transport.state) {
+        let actual = messages.pop_front().unwrap();
+        assert_eq!(msg, actual);
+    }
+
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn transport_handshake_non_streamed() {
     let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).connect();
     let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).listen();
     const_array_dumb_handshake(&mut t1, &mut t2);
@@ -84,6 +121,27 @@ fn transport_handshake() {
 
     let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).listen();
     let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).connect();
+    const_array_dumb_handshake(&mut t1, &mut t2);
+    assert!(t1.opened() && t2.opened());
+}
+
+#[test]
+fn transport_handshake_streamed() {
+    let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER])
+        .connect()
+        .streamed();
+    let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER])
+        .listen()
+        .streamed();
+    const_array_dumb_handshake(&mut t1, &mut t2);
+    assert!(t1.opened() && t2.opened());
+
+    let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER])
+        .listen()
+        .streamed();
+    let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER])
+        .connect()
+        .streamed();
     const_array_dumb_handshake(&mut t1, &mut t2);
     assert!(t1.opened() && t2.opened());
 }
