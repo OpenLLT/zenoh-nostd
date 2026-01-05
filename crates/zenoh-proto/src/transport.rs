@@ -1,81 +1,143 @@
 use core::time::Duration;
+use core::{fmt::Display, u16};
 
 use crate::{
-    fields::ZenohIdProto,
-    transport::{rx::TransportRx, state::TransportState, tx::TransportTx},
+    TransportError,
+    fields::{Resolution, ZenohIdProto},
+    transport::{rx::TransportRx, tx::TransportTx},
 };
 
-mod scope;
-mod state;
+mod establishment;
 
 mod rx;
 mod tx;
 
-#[derive(Debug)]
 pub struct Transport<Buff> {
-    pub tx: TransportTx<Buff>,
-    pub rx: TransportRx<Buff>,
+    zid: ZenohIdProto,
+    batch_size: u16,
+    lease: Duration,
+    resolution: Resolution,
 
-    pub state: TransportState,
+    buff: Buff,
+}
+
+impl Default for Transport<[u8; u16::MAX as usize]> {
+    fn default() -> Self {
+        Self {
+            zid: ZenohIdProto::default(),
+            batch_size: u16::MAX,
+            lease: Duration::from_secs(10),
+            resolution: Resolution::default(),
+            buff: [0u8; u16::MAX as usize],
+        }
+    }
+}
+
+#[repr(u8)]
+pub enum HandshakeError {
+    CouldNotRead = 0,
+    CouldNotWrite = 1,
 }
 
 impl<Buff> Transport<Buff> {
-    pub fn new(buff: Buff) -> Self
-    where
-        Buff: Clone + AsRef<[u8]>,
-    {
-        Self {
-            state: TransportState::codec().with_batch_size(buff.as_ref().len() as u16),
+    pub fn with_zid(mut self, zid: ZenohIdProto) -> Self {
+        self.zid = zid;
+        self
+    }
 
-            tx: TransportTx::new(buff.clone()),
-            rx: TransportRx::new(buff),
+    pub fn with_batch_size(mut self, batch_size: u16) -> Self {
+        self.batch_size = batch_size;
+        self
+    }
+
+    pub fn with_lease(mut self, lease: Duration) -> Self {
+        self.lease = lease;
+        self
+    }
+
+    pub fn with_resolution(mut self, resolution: Resolution) -> Self {
+        self.resolution = resolution;
+        self
+    }
+
+    pub fn with_buff<NewBuff>(self, buff: NewBuff) -> Transport<NewBuff> {
+        Transport {
+            zid: self.zid,
+            batch_size: self.batch_size,
+            lease: self.lease,
+            resolution: self.resolution,
+            buff,
         }
     }
 
-    pub fn codec(mut self) -> Self {
-        self.state = self.state.into_codec();
-        self
-    }
-
-    pub fn listen(mut self) -> Self {
-        self.state = self.state.into_listen();
-        self
-    }
-
-    pub fn connect(mut self) -> Self {
-        self.state = self.state.into_connect();
-        self
-    }
-
-    pub fn batch_size(mut self, batch_size: u16) -> Self {
-        self.state.batch_size = self.state.batch_size.min(batch_size);
-        self
-    }
-
-    pub fn zid(mut self, zid: ZenohIdProto) -> Self {
-        self.state = self.state.with_zid(zid);
-        self
-    }
-
-    pub fn streamed(mut self) -> Self {
-        self.rx.streamed = true;
-        self.tx.streamed = true;
-        self
-    }
-
-    pub fn lease(mut self, lease: Duration) -> Self {
-        self.state.lease = lease;
-        self
-    }
-
-    pub fn opened(&self) -> bool {
-        self.state.opened()
-    }
-
-    pub fn init(&mut self) -> Option<&[u8]>
+    pub fn codec(self) -> OpenedTransport<Buff>
     where
-        Buff: AsMut<[u8]>,
+        Buff: Clone,
     {
-        self.tx.answer(&mut self.state.init().ok())
+        OpenedTransport {
+            tx: TransportTx::new(
+                self.buff.clone(),
+                self.batch_size as usize,
+                0,
+                self.resolution,
+                self.lease,
+            ),
+            rx: TransportRx::new(
+                self.buff,
+                self.batch_size as usize,
+                0,
+                self.resolution,
+                self.lease,
+            ),
+        }
     }
+
+    pub fn sync_listen<E>(
+        mut self,
+        read: impl FnMut(&mut [u8]) -> core::result::Result<usize, E>,
+        write: impl FnMut(&[u8]) -> core::result::Result<(), E>,
+    ) -> core::result::Result<OpenedTransport<Buff>, TransportError>
+    where
+        E: Display,
+    {
+        todo!()
+    }
+
+    pub fn sync_connect<E>(
+        mut self,
+        read: impl FnMut(&mut [u8]) -> core::result::Result<usize, E>,
+        write: impl FnMut(&[u8]) -> core::result::Result<(), E>,
+    ) -> core::result::Result<OpenedTransport<Buff>, TransportError>
+    where
+        E: Display,
+    {
+        todo!()
+    }
+
+    pub async fn async_listen<E>(
+        mut self,
+        read: impl AsyncFnMut(&mut [u8]) -> core::result::Result<usize, E>,
+        write: impl AsyncFnMut(&[u8]) -> core::result::Result<(), E>,
+    ) -> core::result::Result<OpenedTransport<Buff>, TransportError>
+    where
+        E: Display,
+    {
+        todo!()
+    }
+
+    pub async fn async_connect<E>(
+        mut self,
+        read: impl AsyncFnMut(&mut [u8]) -> core::result::Result<usize, E>,
+        write: impl AsyncFnMut(&[u8]) -> core::result::Result<(), E>,
+    ) -> core::result::Result<OpenedTransport<Buff>, TransportError>
+    where
+        E: Display,
+    {
+        todo!()
+    }
+}
+
+pub struct OpenedTransport<Buff> {
+    tx: TransportTx<Buff>,
+    rx: TransportRx<Buff>,
 }

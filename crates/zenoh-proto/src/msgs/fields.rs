@@ -76,7 +76,7 @@ impl<'a> ZBodyDecode<'a> for BatchSize {
 
 crate::derive_zstruct_with_body!(BatchSize);
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Copy)]
 #[repr(transparent)]
 pub struct ZenohIdProto(pub(crate) uhlc::ID);
 

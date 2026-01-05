@@ -36,7 +36,7 @@ pub use keepalive::*;
 pub use open::*;
 use zenoh_derive::ZEnum;
 
-use crate::{CodecError, ZEncode, ZWriteable, exts::QoS, fields::Reliability};
+use crate::{exts::*, fields::*};
 
 #[derive(ZEnum, Debug, PartialEq, Clone)]
 pub enum NetworkBody<'a> {
@@ -66,38 +66,8 @@ pub enum TransportMessage<'a> {
     OpenAck(OpenAck<'a>),
 }
 
-impl NetworkMessage<'_> {
-    pub fn z_encode(
-        &self,
-        w: &mut impl ZWriteable,
-        reliability: &mut Option<Reliability>,
-        qos: &mut Option<QoS>,
-        sn: &mut u32,
-    ) -> core::result::Result<(), CodecError> {
-        let r = self.reliability;
-        let q = self.qos;
-
-        if reliability.as_ref() != Some(&r) || qos.as_ref() != Some(&q) {
-            FrameHeader {
-                reliability: r,
-                sn: *sn,
-                qos: q,
-            }
-            .z_encode(w)?;
-
-            *reliability = Some(r);
-            *qos = Some(q);
-            *sn = sn.wrapping_add(1);
-        }
-
-        match &self.body {
-            NetworkBody::Push(body) => body.z_encode(w),
-            NetworkBody::Request(body) => body.z_encode(w),
-            NetworkBody::Response(body) => body.z_encode(w),
-            NetworkBody::ResponseFinal(body) => body.z_encode(w),
-            NetworkBody::Interest(body) => body.z_encode(w),
-            NetworkBody::InterestFinal(body) => body.z_encode(w),
-            NetworkBody::Declare(body) => body.z_encode(w),
-        }
-    }
+#[derive(Debug, PartialEq, Clone)]
+pub enum Message<'a> {
+    Network(NetworkMessage<'a>),
+    Transport(TransportMessage<'a>),
 }
