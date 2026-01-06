@@ -1,3 +1,43 @@
+#[cfg(feature = "stderr")]
+#[macro_export]
+macro_rules! trace {
+    ($($arg:tt)+) => {
+        std::eprintln!($($arg)+)
+    };
+}
+
+#[cfg(feature = "stderr")]
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)+) => {
+        std::eprintln!($($arg)+)
+    };
+}
+
+#[cfg(feature = "stderr")]
+#[macro_export]
+macro_rules! info {
+    ($($arg:tt)+) => {
+        std::eprintln!($($arg)+)
+    };
+}
+
+#[cfg(feature = "stderr")]
+#[macro_export]
+macro_rules! warn {
+    ($($arg:tt)+) => {
+        std::eprintln!($($arg)+)
+    };
+}
+
+#[cfg(feature = "stderr")]
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)+) => {
+        std::eprintln!($($arg)+)
+    };
+}
+
 #[cfg(feature = "log")]
 pub use log;
 
@@ -132,7 +172,12 @@ macro_rules! error {
     };
 }
 
-#[cfg(not(any(feature = "log", feature = "defmt", feature = "web_console")))]
+#[cfg(not(any(
+    feature = "log",
+    feature = "defmt",
+    feature = "web_console",
+    feature = "stderr"
+)))]
 #[macro_export]
 macro_rules! trace {
     ($($arg:tt)+) => {{
@@ -140,7 +185,12 @@ macro_rules! trace {
     }};
 }
 
-#[cfg(not(any(feature = "log", feature = "defmt", feature = "web_console")))]
+#[cfg(not(any(
+    feature = "log",
+    feature = "defmt",
+    feature = "web_console",
+    feature = "stderr"
+)))]
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)+) => {{
@@ -148,7 +198,12 @@ macro_rules! debug {
     }};
 }
 
-#[cfg(not(any(feature = "log", feature = "defmt", feature = "web_console")))]
+#[cfg(not(any(
+    feature = "log",
+    feature = "defmt",
+    feature = "web_console",
+    feature = "stderr"
+)))]
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)+) => {{
@@ -156,7 +211,12 @@ macro_rules! info {
     }};
 }
 
-#[cfg(not(any(feature = "log", feature = "defmt", feature = "web_console")))]
+#[cfg(not(any(
+    feature = "log",
+    feature = "defmt",
+    feature = "web_console",
+    feature = "stderr"
+)))]
 #[macro_export]
 macro_rules! warn {
     ($($arg:tt)+) => {{
@@ -164,7 +224,12 @@ macro_rules! warn {
     }};
 }
 
-#[cfg(not(any(feature = "log", feature = "defmt", feature = "web_console")))]
+#[cfg(not(any(
+    feature = "log",
+    feature = "defmt",
+    feature = "web_console",
+    feature = "stderr"
+)))]
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)+) => {{

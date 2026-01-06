@@ -18,14 +18,14 @@ pub(crate) struct Description {
     pub mine_lease: Duration,
     pub other_lease: Duration,
 
-    pub sn: u32,
+    pub mine_sn: u32,
     pub other_sn: u32,
 
     pub other_zid: ZenohIdProto,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-enum State {
+pub(crate) enum State {
     WaitingInitSyn {
         /// Mine zid
         mine_zid: ZenohIdProto,
@@ -85,7 +85,7 @@ impl State {
             return Some(*description);
         }
 
-        for (msg, buff) in crate::codec::transport_decoder(read) {
+        for (msg, buff) in crate::codec::transport_decoder(read, &mut 0, Resolution::default()) {
             let response = match msg {
                 // Don't do any computation at this stage. Pass the relevant values as the cookie
                 // for future computation.
@@ -193,16 +193,18 @@ impl State {
                         mine_lease,
                     } => {
                         // TODO: decypher cookie
-                        let syn =
-                            match crate::codec::transport_decoder(open.cookie).find_map(|msg| {
-                                match msg.0 {
-                                    TransportMessage::InitSyn(syn) => Some(syn),
-                                    _ => None,
-                                }
-                            }) {
-                                Some(syn) => syn,
-                                None => crate::zbail!(@continue TransportError::InvalidAttribute),
-                            };
+                        let syn = match crate::codec::transport_decoder(
+                            open.cookie,
+                            &mut 0,
+                            Resolution::default(),
+                        )
+                        .find_map(|msg| match msg.0 {
+                            TransportMessage::InitSyn(syn) => Some(syn),
+                            _ => None,
+                        }) {
+                            Some(syn) => syn,
+                            None => crate::zbail!(@continue TransportError::InvalidAttribute),
+                        };
 
                         crate::debug!(
                             "Received OpenSyn on transport {:?} -> NEW!({:?})",
@@ -250,7 +252,7 @@ impl State {
                             resolution,
                             mine_lease,
                             other_lease: open.lease,
-                            sn,
+                            mine_sn: sn,
                             other_sn: open.sn,
                             other_zid: syn.identifier.zid,
                         });
@@ -279,7 +281,7 @@ impl State {
                             resolution,
                             mine_lease,
                             other_lease: ack.lease,
-                            sn,
+                            mine_sn: sn,
                             other_sn: ack.sn,
                             other_zid,
                         });
@@ -307,85 +309,4 @@ impl State {
     pub(crate) fn opened(&self) -> bool {
         matches!(self, Self::Opened { .. })
     }
-}
-
-#[test]
-fn transport_state_handshake_regular() {
-    let mut a = State::WaitingInitSyn {
-        mine_zid: ZenohIdProto::default(),
-        mine_batch_size: 512,
-        mine_resolution: Resolution::default(),
-        mine_lease: Duration::from_secs(30),
-    };
-
-    let b_zid = ZenohIdProto::default();
-    let mut b = State::WaitingInitAck {
-        mine_zid: b_zid,
-        mine_batch_size: 1025,
-        mine_resolution: Resolution::default(),
-        mine_lease: Duration::from_secs(37),
-    };
-
-    let mut buff1 = [0u8; 512];
-    let mut buff2 = [0u8; 512];
-
-    // Simulate 'b' sending InitSyn
-    let mut len: usize = crate::codec::transport_encoder(
-        &mut buff1,
-        core::iter::once(TransportMessage::InitSyn(InitSyn {
-            identifier: InitIdentifier {
-                zid: b_zid,
-                ..Default::default()
-            },
-            resolution: InitResolution {
-                resolution: Resolution::default(),
-                batch_size: BatchSize(1025),
-            },
-            ..Default::default()
-        })),
-    )
-    .sum();
-
-    // a receives InitSyn and goes to WaitingOpenSyn state and writes an InitAck on buff2
-    a.poll(&buff1[..len], (&mut buff2, &mut len));
-    // b receives an InitAck and goes to WaitingOpenAck and writes an OpenSyn on buff1
-    b.poll(&buff2[..len], (&mut buff1, &mut len));
-    // a receives an OpenSyn and goes to Opened and writes an OpenAck on buff2
-    a.poll(&buff1[..len], (&mut buff2, &mut len));
-    // b receives an OpenAck and goes to Opened
-    b.poll(&buff2[..len], (&mut buff1, &mut len));
-
-    assert!(a.opened() && b.opened());
-}
-
-#[test]
-fn transport_state_handshake_skip() {
-    let mut a = State::WaitingInitSyn {
-        mine_zid: ZenohIdProto::default(),
-        mine_batch_size: 512,
-        mine_resolution: Resolution::default(),
-        mine_lease: Duration::from_secs(30),
-    };
-
-    let mut socket = [0u8; 512];
-    let writer = &mut socket[..];
-
-    let mut len = crate::codec::transport_encoder(
-        writer,
-        core::iter::once(TransportMessage::InitSyn(InitSyn::default())),
-    )
-    .sum::<usize>();
-
-    let (cookie, remain) = writer.split_at_mut(len);
-    len += crate::codec::transport_encoder(
-        remain,
-        core::iter::once(TransportMessage::OpenSyn(OpenSyn {
-            cookie,
-            ..Default::default()
-        })),
-    )
-    .sum::<usize>();
-
-    a.poll(&socket[..len], (&mut [0u8; 512], &mut 0));
-    assert!(a.opened())
 }

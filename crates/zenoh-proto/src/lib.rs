@@ -26,3 +26,19 @@ pub(crate) use zenoh_derive::*;
 
 #[cfg(test)]
 mod tests;
+
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ZInstant(core::time::Duration);
+
+impl From<core::time::Duration> for ZInstant {
+    fn from(value: core::time::Duration) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ZInstant> for core::time::Duration {
+    fn from(value: ZInstant) -> Self {
+        value.0
+    }
+}

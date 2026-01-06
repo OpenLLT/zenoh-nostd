@@ -6,7 +6,13 @@ pub use r#struct::*;
 
 use crate::{ZReadable, exts::*, fields::*, msgs::*};
 
-fn decode<'a>(reader: &mut &'a [u8], last_frame: &mut Option<FrameHeader>) -> Option<Message<'a>> {
+fn decode<'a>(
+    reader: &mut &'a [u8],
+    reliability: &mut Option<Reliability>,
+    qos: &mut Option<QoS>,
+    sn: &mut u32,
+    resolution: Resolution,
+) -> Option<Message<'a>> {
     if !reader.can_read() {
         return None;
     }
@@ -34,34 +40,32 @@ fn decode<'a>(reader: &mut &'a [u8], last_frame: &mut Option<FrameHeader>) -> Op
     }
 
     let ack = header & 0b0010_0000 != 0;
-    let net = last_frame.is_some();
+    let net = reliability.is_some() && qos.is_some();
     let ifinal = header & 0b0110_0000 == 0;
     let id = header & 0b0001_1111;
-
-    let reliability = last_frame.as_ref().map(|f| f.reliability);
-    let qos = last_frame.as_ref().map(|f| f.qos);
-    let sn = last_frame.as_ref().map(|f| f.sn);
 
     let body = match id {
         FrameHeader::ID => {
             let header = decode!(FrameHeader);
 
-            if let Some(sn) = sn {
-                if header.sn <= sn && sn != 0 {
-                    // Special case when 0
-                    crate::error!(
-                        "Inconsistent `SN` value {}, expected higher than {}",
-                        header.sn,
-                        sn
-                    );
-                    return None;
-                } else if header.sn != sn + 1 {
-                    crate::debug!("Transport missed {} messages", header.sn - sn - 1);
-                }
+            // Check for missed messages regarding resolution
+            let _ = resolution;
+            if header.sn <= *sn && *sn != 0 {
+                crate::error!(
+                    "Inconsistent `SN` value {}, expected higher than {}",
+                    header.sn,
+                    sn
+                );
+                return None;
+            } else if header.sn != *sn + 1 && *sn != 0 {
+                crate::debug!("Transport missed {} messages", header.sn - *sn - 1);
             }
 
-            last_frame.replace(header);
-            return decode(reader, last_frame);
+            reliability.replace(header.reliability);
+            qos.replace(header.qos);
+            *sn = header.sn;
+
+            return decode(reader, reliability, qos, sn, resolution);
         }
         InitAck::ID if ack => Message::Transport(TransportMessage::InitAck(decode!(InitAck))),
         InitSyn::ID => Message::Transport(TransportMessage::InitSyn(decode!(InitSyn))),
@@ -104,6 +108,12 @@ fn decode<'a>(reader: &mut &'a [u8], last_frame: &mut Option<FrameHeader>) -> Op
             qos: qos.expect("Should be a frame. Something went wrong."),
             body: NetworkBody::Declare(decode!(Declare)),
         }),
+        #[cfg(test)]
+        RawBody::ID if net => Message::Network(NetworkMessage {
+            reliability: reliability.expect("Should be a frame. Something went wrong."),
+            qos: qos.expect("Should be a frame. Something went wrong."),
+            body: NetworkBody::RawBody(decode!(RawBody)),
+        }),
         _ => {
             crate::error!(
                 "Unrecognized message header: {:08b}. Skipping the rest of the message - {}",
@@ -117,13 +127,18 @@ fn decode<'a>(reader: &mut &'a [u8], last_frame: &mut Option<FrameHeader>) -> Op
     Some(body)
 }
 
-pub(crate) fn decoder<'a>(bytes: &'a [u8]) -> impl Iterator<Item = (Message<'a>, &'a [u8])> {
+pub(crate) fn decoder<'a>(
+    bytes: &'a [u8],
+    sn: &mut u32,
+    resolution: Resolution,
+) -> impl Iterator<Item = (Message<'a>, &'a [u8])> {
     let mut reader = &bytes[..];
-    let mut last_frame: Option<FrameHeader> = None;
+    let mut reliability: Option<Reliability> = None;
+    let mut qos: Option<QoS> = None;
 
     core::iter::from_fn(move || {
         let (data, start) = (reader.as_ptr(), reader.len());
-        let msg = decode(&mut reader, &mut last_frame);
+        let msg = decode(&mut reader, &mut reliability, &mut qos, sn, resolution);
         let len = start - reader.len();
         msg.map(|msg| (msg, unsafe { core::slice::from_raw_parts(data, len) }))
     })
@@ -131,8 +146,10 @@ pub(crate) fn decoder<'a>(bytes: &'a [u8]) -> impl Iterator<Item = (Message<'a>,
 
 pub(crate) fn transport_decoder<'a>(
     bytes: &'a [u8],
+    sn: &mut u32,
+    resolution: Resolution,
 ) -> impl Iterator<Item = (TransportMessage<'a>, &'a [u8])> {
-    decoder(bytes).filter_map(|m| match m.0 {
+    decoder(bytes, sn, resolution).filter_map(|m| match m.0 {
         Message::Transport(msg) => Some((msg, m.1)),
         _ => None,
     })
@@ -140,8 +157,10 @@ pub(crate) fn transport_decoder<'a>(
 
 pub(crate) fn network_decoder<'a>(
     bytes: &'a [u8],
+    sn: &mut u32,
+    resolution: Resolution,
 ) -> impl Iterator<Item = (NetworkMessage<'a>, &'a [u8])> {
-    decoder(bytes).filter_map(|m| match m.0 {
+    decoder(bytes, sn, resolution).filter_map(|m| match m.0 {
         Message::Network(msg) => Some((msg, m.1)),
         _ => None,
     })
@@ -149,15 +168,16 @@ pub(crate) fn network_decoder<'a>(
 
 fn encode<'a, 'b>(
     writer: &mut &'a mut [u8],
-    msg: Message<'b>,
+    msg: MessageRef<'b>,
     reliability: &mut Option<Reliability>,
     qos: &mut Option<QoS>,
     next_sn: &mut u32,
+    resolution: Resolution,
 ) -> Option<usize> {
     let start = writer.len();
 
     match msg {
-        Message::Network(msg) => {
+        MessageRef::Network(msg) => {
             let r = msg.reliability;
             let q = msg.qos;
 
@@ -172,12 +192,14 @@ fn encode<'a, 'b>(
 
                 *reliability = Some(r);
                 *qos = Some(q);
+                // TODO: wrap with resolution
+                let _ = resolution;
                 *next_sn = next_sn.wrapping_add(1);
             }
 
             msg.body.z_encode(writer).ok()
         }
-        Message::Transport(msg) => msg.z_encode(writer).ok(),
+        MessageRef::Transport(msg) => msg.z_encode(writer).ok(),
     }?;
 
     Some(start - writer.len())
@@ -187,6 +209,29 @@ pub(crate) fn encoder<'a, 'b>(
     bytes: &'a mut [u8],
     mut msgs: impl Iterator<Item = Message<'b>>,
     next_sn: &mut u32,
+    resolution: Resolution,
+) -> impl Iterator<Item = usize> {
+    let mut writer = &mut bytes[..];
+    let mut last_reliability: Option<Reliability> = None;
+    let mut last_qos: Option<QoS> = None;
+    core::iter::from_fn(move || {
+        let msg = msgs.next()?;
+        encode(
+            &mut writer,
+            msg.as_ref(),
+            &mut last_reliability,
+            &mut last_qos,
+            next_sn,
+            resolution,
+        )
+    })
+}
+
+pub(crate) fn encoder_ref<'a, 'b>(
+    bytes: &'a mut [u8],
+    mut msgs: impl Iterator<Item = MessageRef<'b>>,
+    next_sn: &mut u32,
+    resolution: Resolution,
 ) -> impl Iterator<Item = usize> {
     let mut writer = &mut bytes[..];
     let mut last_reliability: Option<Reliability> = None;
@@ -199,6 +244,7 @@ pub(crate) fn encoder<'a, 'b>(
             &mut last_reliability,
             &mut last_qos,
             next_sn,
+            resolution,
         )
     })
 }
@@ -212,10 +258,29 @@ pub(crate) fn transport_encoder<'a, 'b>(
         let msg = msgs.next()?;
         encode(
             &mut writer,
-            Message::Transport(msg),
+            MessageRef::Transport(&msg),
             &mut None,
             &mut None,
             &mut 0,
+            Resolution::default(),
+        )
+    })
+}
+
+pub(crate) fn transport_encoder_ref<'a, 'b>(
+    bytes: &'a mut [u8],
+    mut msgs: impl Iterator<Item = &'b TransportMessage<'b>>,
+) -> impl Iterator<Item = usize> {
+    let mut writer = &mut bytes[..];
+    core::iter::from_fn(move || {
+        let msg = msgs.next()?;
+        encode(
+            &mut writer,
+            MessageRef::Transport(msg),
+            &mut None,
+            &mut None,
+            &mut 0,
+            Resolution::default(),
         )
     })
 }
@@ -224,6 +289,7 @@ pub(crate) fn network_encoder<'a, 'b>(
     bytes: &'a mut [u8],
     mut msgs: impl Iterator<Item = NetworkMessage<'b>>,
     next_sn: &mut u32,
+    resolution: Resolution,
 ) -> impl Iterator<Item = usize> {
     let mut writer = &mut bytes[..];
     let mut last_reliability: Option<Reliability> = None;
@@ -232,10 +298,33 @@ pub(crate) fn network_encoder<'a, 'b>(
         let msg = msgs.next()?;
         encode(
             &mut writer,
-            Message::Network(msg),
+            MessageRef::Network(&msg),
             &mut last_reliability,
             &mut last_qos,
             next_sn,
+            resolution,
+        )
+    })
+}
+
+pub(crate) fn network_encoder_ref<'a, 'b>(
+    bytes: &'a mut [u8],
+    mut msgs: impl Iterator<Item = &'b NetworkMessage<'b>>,
+    next_sn: &mut u32,
+    resolution: Resolution,
+) -> impl Iterator<Item = usize> {
+    let mut writer = &mut bytes[..];
+    let mut last_reliability: Option<Reliability> = None;
+    let mut last_qos: Option<QoS> = None;
+    core::iter::from_fn(move || {
+        let msg = msgs.next()?;
+        encode(
+            &mut writer,
+            MessageRef::Network(msg),
+            &mut last_reliability,
+            &mut last_qos,
+            next_sn,
+            resolution,
         )
     })
 }

@@ -217,6 +217,11 @@ macro_rules! zbail {
         continue;
     }};
 
+    (@None $err:expr) => {{
+        $crate::error!("{}: {}", $err, $crate::zctx!());
+        return None;
+    }};
+
     ($err:expr, $($arg:tt)+) => {{
         $crate::error!("{}: {}", $err, $crate::zctx!());
         $crate::error!($($arg)+);

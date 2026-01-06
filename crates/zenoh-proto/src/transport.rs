@@ -1,19 +1,27 @@
 use core::time::Duration;
 use core::{fmt::Display, u16};
 
+use crate::establishment::Description;
+use crate::fields::BatchSize;
+use crate::msgs::{InitIdentifier, InitResolution, InitSyn};
 use crate::{
     TransportError,
     fields::{Resolution, ZenohIdProto},
-    transport::{rx::TransportRx, tx::TransportTx},
 };
 
-mod establishment;
+pub(crate) mod establishment;
 
 mod rx;
 mod tx;
 
+mod handshake;
+
+pub use rx::*;
+pub use tx::*;
+
 pub struct Transport<Buff> {
     zid: ZenohIdProto,
+    streamed: bool,
     batch_size: u16,
     lease: Duration,
     resolution: Resolution,
@@ -21,27 +29,27 @@ pub struct Transport<Buff> {
     buff: Buff,
 }
 
-impl Default for Transport<[u8; u16::MAX as usize]> {
-    fn default() -> Self {
-        Self {
+impl<Buff> Transport<Buff> {
+    pub fn new(buff: Buff) -> Self
+    where
+        Buff: AsRef<[u8]>,
+    {
+        Transport {
             zid: ZenohIdProto::default(),
-            batch_size: u16::MAX,
+            streamed: false,
+            batch_size: buff.as_ref().len() as u16,
             lease: Duration::from_secs(10),
             resolution: Resolution::default(),
-            buff: [0u8; u16::MAX as usize],
+            buff: buff,
         }
     }
-}
-
-#[repr(u8)]
-pub enum HandshakeError {
-    CouldNotRead = 0,
-    CouldNotWrite = 1,
-}
-
-impl<Buff> Transport<Buff> {
     pub fn with_zid(mut self, zid: ZenohIdProto) -> Self {
         self.zid = zid;
+        self
+    }
+
+    pub fn streamed(mut self) -> Self {
+        self.streamed = true;
         self
     }
 
@@ -63,6 +71,7 @@ impl<Buff> Transport<Buff> {
     pub fn with_buff<NewBuff>(self, buff: NewBuff) -> Transport<NewBuff> {
         Transport {
             zid: self.zid,
+            streamed: self.streamed,
             batch_size: self.batch_size,
             lease: self.lease,
             resolution: self.resolution,
@@ -77,6 +86,7 @@ impl<Buff> Transport<Buff> {
         OpenedTransport {
             tx: TransportTx::new(
                 self.buff.clone(),
+                self.streamed,
                 self.batch_size as usize,
                 0,
                 self.resolution,
@@ -84,15 +94,18 @@ impl<Buff> Transport<Buff> {
             ),
             rx: TransportRx::new(
                 self.buff,
+                self.streamed,
                 self.batch_size as usize,
                 0,
                 self.resolution,
                 self.lease,
             ),
+            mine_zid: self.zid,
+            other_zid: self.zid,
         }
     }
 
-    pub fn sync_listen<E>(
+    pub fn listen<E>(
         mut self,
         read: impl FnMut(&mut [u8]) -> core::result::Result<usize, E>,
         write: impl FnMut(&[u8]) -> core::result::Result<(), E>,
@@ -103,7 +116,7 @@ impl<Buff> Transport<Buff> {
         todo!()
     }
 
-    pub fn sync_connect<E>(
+    pub fn connect<E>(
         mut self,
         read: impl FnMut(&mut [u8]) -> core::result::Result<usize, E>,
         write: impl FnMut(&[u8]) -> core::result::Result<(), E>,
@@ -111,33 +124,64 @@ impl<Buff> Transport<Buff> {
     where
         E: Display,
     {
-        todo!()
-    }
+        // let init = InitSyn {
+        //     identifier: InitIdentifier {
+        //         zid: self.zid,
+        //         ..Default::default()
+        //     },
+        //     resolution: InitResolution {
+        //         resolution: self.resolution,
+        //         batch_size: BatchSize(self.batch_size),
+        //     },
+        //     ..Default::default()
+        // };
 
-    pub async fn async_listen<E>(
-        mut self,
-        read: impl AsyncFnMut(&mut [u8]) -> core::result::Result<usize, E>,
-        write: impl AsyncFnMut(&[u8]) -> core::result::Result<(), E>,
-    ) -> core::result::Result<OpenedTransport<Buff>, TransportError>
-    where
-        E: Display,
-    {
-        todo!()
-    }
-
-    pub async fn async_connect<E>(
-        mut self,
-        read: impl AsyncFnMut(&mut [u8]) -> core::result::Result<usize, E>,
-        write: impl AsyncFnMut(&[u8]) -> core::result::Result<(), E>,
-    ) -> core::result::Result<OpenedTransport<Buff>, TransportError>
-    where
-        E: Display,
-    {
         todo!()
     }
 }
 
 pub struct OpenedTransport<Buff> {
-    tx: TransportTx<Buff>,
-    rx: TransportRx<Buff>,
+    pub tx: TransportTx<Buff>,
+    pub rx: TransportRx<Buff>,
+
+    pub mine_zid: ZenohIdProto,
+    pub other_zid: ZenohIdProto,
+}
+
+impl<Buff> From<(Description, bool, Buff, Buff)> for OpenedTransport<Buff> {
+    fn from(value: (Description, bool, Buff, Buff)) -> Self {
+        let (description, streamed, tx, rx) = value;
+
+        OpenedTransport {
+            tx: TransportTx::new(
+                tx,
+                streamed,
+                description.batch_size as usize,
+                description.mine_sn,
+                description.resolution,
+                description.mine_lease,
+            ),
+            rx: TransportRx::new(
+                rx,
+                streamed,
+                description.batch_size as usize,
+                description.other_sn,
+                description.resolution,
+                description.other_lease,
+            ),
+            mine_zid: description.mine_zid,
+            other_zid: description.other_zid,
+        }
+    }
+}
+
+impl<Buff> OpenedTransport<Buff> {
+    pub fn streamed(mut self) -> Self {
+        self.tx.set_streamed();
+        self.rx.set_streamed();
+
+        self
+    }
+
+    pub fn sync(&mut self, _: core::time::Duration) {}
 }
