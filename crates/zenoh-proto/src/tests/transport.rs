@@ -301,8 +301,8 @@ fn transport_codec_streamed() {
     };
 
     let mut transport = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER])
-        .codec()
-        .streamed();
+        .streamed()
+        .codec();
 
     transport.tx.encode_ref(messages.iter()).unwrap();
     transport.rx.decode(transport.tx.flush().unwrap()).unwrap();
@@ -315,19 +315,18 @@ fn transport_codec_streamed() {
     assert!(messages.is_empty());
 }
 
-fn transport_handshake() {
-    let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).connect(
-        |read: &mut [u8]| {
-            let _ = 3;
-            Ok::<usize, usize>(0)
-        },
-        |write: &[u8]| {
-            let _ = 3;
-            Ok::<(), usize>(())
-        },
-    );
-    // let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).listen();
-}
+// fn transport_handshake() {
+//     let mut socket = [0u8; MAX_PAYLOAD_SIZE * NUM_ITER];
+//     let mut len = 0;
+
+//     let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]);
+//     let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]);
+
+//     let t1 = t1.connect(|bytes| {
+//         socket[..bytes.len()].copy_from_slice(bytes);
+//         Ok::<_, usize>(())
+//     });
+// }
 
 // fn dumb_handshake<const N: usize>(t1: &mut Transport<[u8; N]>, t2: &mut Transport<[u8; N]>) {
 //     fn step<const N: usize>(transport: &mut Transport<[u8; N]>, socket: (&mut [u8], &mut usize)) {

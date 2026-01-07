@@ -3,13 +3,14 @@ use core::{fmt::Display, u16};
 
 use crate::establishment::Description;
 use crate::fields::BatchSize;
-use crate::msgs::{InitIdentifier, InitResolution, InitSyn};
+use crate::msgs::{InitIdentifier, InitResolution, InitSyn, TransportMessage};
 use crate::{
     TransportError,
     fields::{Resolution, ZenohIdProto},
 };
 
 pub(crate) mod establishment;
+pub(crate) mod helper;
 
 mod rx;
 mod tx;
@@ -118,23 +119,54 @@ impl<Buff> Transport<Buff> {
 
     pub fn connect<E>(
         mut self,
-        read: impl FnMut(&mut [u8]) -> core::result::Result<usize, E>,
-        write: impl FnMut(&[u8]) -> core::result::Result<(), E>,
+        mut write: impl FnMut(&[u8]) -> core::result::Result<(), E>,
     ) -> core::result::Result<OpenedTransport<Buff>, TransportError>
     where
         E: Display,
+        Buff: AsMut<[u8]> + AsRef<[u8]>,
     {
-        // let init = InitSyn {
-        //     identifier: InitIdentifier {
-        //         zid: self.zid,
-        //         ..Default::default()
-        //     },
-        //     resolution: InitResolution {
-        //         resolution: self.resolution,
-        //         batch_size: BatchSize(self.batch_size),
-        //     },
-        //     ..Default::default()
-        // };
+        let init = InitSyn {
+            identifier: InitIdentifier {
+                zid: self.zid,
+                ..Default::default()
+            },
+            resolution: InitResolution {
+                resolution: self.resolution,
+                batch_size: BatchSize(self.batch_size),
+            },
+            ..Default::default()
+        };
+
+        let buff_mut = self.buff.as_mut();
+
+        let slice_mut = if self.streamed {
+            if buff_mut.len() < 2 {
+                crate::zbail!(@log TransportError::TransportTooSmall);
+            }
+
+            &mut buff_mut[2..]
+        } else {
+            &mut buff_mut[..]
+        };
+
+        let len = crate::codec::transport_encoder(
+            slice_mut,
+            core::iter::once(TransportMessage::InitSyn(init)),
+        )
+        .sum::<usize>();
+
+        let len = if self.streamed {
+            let length = (len as u16).to_le_bytes();
+            buff_mut[..2].copy_from_slice(&length);
+            len + 2
+        } else {
+            len
+        };
+
+        write(&buff_mut[..len]).map_err(|e| {
+            crate::error!("{e}");
+            TransportError::CouldNotWrite
+        })?;
 
         todo!()
     }
@@ -176,11 +208,27 @@ impl<Buff> From<(Description, bool, Buff, Buff)> for OpenedTransport<Buff> {
 }
 
 impl<Buff> OpenedTransport<Buff> {
-    pub fn streamed(mut self) -> Self {
-        self.tx.set_streamed();
-        self.rx.set_streamed();
-
-        self
+    pub(crate) fn new(description: Description, streamed: bool, tx: Buff, rx: Buff) -> Self {
+        Self {
+            tx: TransportTx::new(
+                tx,
+                streamed,
+                description.batch_size as usize,
+                description.mine_sn,
+                description.resolution,
+                description.mine_lease,
+            ),
+            rx: TransportRx::new(
+                rx,
+                streamed,
+                description.batch_size as usize,
+                description.other_sn,
+                description.resolution,
+                description.other_lease,
+            ),
+            mine_zid: description.mine_zid,
+            other_zid: description.other_zid,
+        }
     }
 
     pub fn sync(&mut self, _: core::time::Duration) {}

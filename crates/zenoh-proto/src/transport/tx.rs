@@ -37,17 +37,13 @@ impl<Buff> TransportTx<Buff> {
         Self {
             buff,
             streamed,
-            cursor: 0,
+            cursor: if streamed { 2 } else { 0 },
             batch_size,
             sn,
             resolution,
             lease,
             state: State::Opened,
         }
-    }
-
-    pub(crate) fn set_streamed(&mut self) {
-        self.streamed = true;
     }
 
     pub fn encode<'a>(
@@ -57,39 +53,11 @@ impl<Buff> TransportTx<Buff> {
     where
         Buff: AsMut<[u8]> + AsRef<[u8]>,
     {
-        let full_size = core::cmp::min(self.buff.as_ref().len(), self.batch_size);
-        let left = full_size - self.cursor;
-        let buff_mut = &mut self.buff.as_mut()[self.cursor..full_size];
+        let max = core::cmp::min(self.buff.as_ref().len(), self.batch_size);
+        let buff = &mut self.buff.as_mut()[self.cursor..max];
 
-        let slice_mut = if self.streamed {
-            if 2 > left {
-                crate::zbail!(@log TransportError::TransportTooSmall);
-            }
-
-            &mut buff_mut[2..]
-        } else {
-            &mut buff_mut[..]
-        };
-
-        let len = {
-            let len = crate::codec::network_encoder(slice_mut, msgs, &mut self.sn, self.resolution)
-                .sum::<usize>();
-
-            if self.streamed {
-                if 2 + len > left {
-                    crate::zbail!(@log TransportError::TransportIsFull);
-                }
-
-                let length = (len as u16).to_le_bytes();
-                buff_mut[..2].copy_from_slice(&length);
-                len + 2
-            } else {
-                if len > left {
-                    crate::zbail!(@log TransportError::TransportIsFull);
-                }
-                len
-            }
-        };
+        let len =
+            crate::codec::network_encoder(buff, msgs, &mut self.sn, self.resolution).sum::<usize>();
 
         if len != 0 {
             self.state = State::Used;
@@ -107,40 +75,11 @@ impl<Buff> TransportTx<Buff> {
     where
         Buff: AsMut<[u8]> + AsRef<[u8]>,
     {
-        let full_size = core::cmp::min(self.buff.as_ref().len(), self.batch_size);
-        let left = full_size - self.cursor;
-        let buff_mut = &mut self.buff.as_mut()[self.cursor..full_size];
+        let max = core::cmp::min(self.buff.as_ref().len(), self.batch_size);
+        let buff = &mut self.buff.as_mut()[self.cursor..max];
 
-        let slice_mut = if self.streamed {
-            if 2 > left {
-                crate::zbail!(@log TransportError::TransportTooSmall);
-            }
-
-            &mut buff_mut[2..]
-        } else {
-            &mut buff_mut[..]
-        };
-
-        let len = {
-            let len =
-                crate::codec::network_encoder_ref(slice_mut, msgs, &mut self.sn, self.resolution)
-                    .sum::<usize>();
-
-            if self.streamed {
-                if 2 + len > left {
-                    crate::zbail!(@log TransportError::TransportIsFull);
-                }
-
-                let length = (len as u16).to_le_bytes();
-                buff_mut[..2].copy_from_slice(&length);
-                len + 2
-            } else {
-                if len > left {
-                    crate::zbail!(@log TransportError::TransportIsFull);
-                }
-                len
-            }
-        };
+        let len = crate::codec::network_encoder_ref(buff, msgs, &mut self.sn, self.resolution)
+            .sum::<usize>();
 
         if len != 0 {
             self.state = State::Used;
@@ -153,14 +92,26 @@ impl<Buff> TransportTx<Buff> {
 
     pub fn flush(&mut self) -> Option<&'_ [u8]>
     where
-        Buff: AsRef<[u8]>,
+        Buff: AsMut<[u8]> + AsRef<[u8]>,
     {
         let size = core::cmp::min(
             self.buff.as_ref().len(),
             core::cmp::min(self.batch_size, self.cursor),
         );
-        let buff_ref = &self.buff.as_ref()[..size];
 
+        if self.streamed {
+            if size < 2 {
+                crate::zbail!(@None TransportError::TransportTooSmall);
+            }
+
+            let len = ((size - 2) as u16).to_le_bytes();
+            self.buff.as_mut()[..2].copy_from_slice(&len);
+            self.cursor = 2;
+        } else {
+            self.cursor = 0;
+        }
+
+        let buff_ref = &self.buff.as_ref()[..size];
         if size > 0 { Some(buff_ref) } else { None }
     }
 

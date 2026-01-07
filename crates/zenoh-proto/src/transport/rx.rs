@@ -55,11 +55,7 @@ impl<Buff> TransportRx<Buff> {
         }
     }
 
-    pub(crate) fn set_streamed(&mut self) {
-        self.streamed = true;
-    }
-
-    pub fn decode(&mut self, read: &[u8]) -> core::result::Result<(), TransportError>
+    pub fn decode(&mut self, mut read: &[u8]) -> core::result::Result<(), TransportError>
     where
         Buff: AsMut<[u8]> + AsRef<[u8]>,
     {
@@ -67,43 +63,13 @@ impl<Buff> TransportRx<Buff> {
             return Ok(());
         }
 
-        let full_size = core::cmp::min(self.buff.as_ref().len(), self.batch_size);
-        let left = full_size - self.cursor;
-        let buff_mut = &mut self.buff.as_mut()[self.cursor..full_size];
-        let len = if self.streamed {
-            if 2 > left {
-                crate::zbail!(@log TransportError::TransportTooSmall);
-            }
-
-            let mut len = [0u8; 2];
-            len.copy_from_slice(&read[..2]);
-
-            let len = u16::from_le_bytes(len) as usize;
-            if len > left {
-                crate::zbail!(@log TransportError::TransportIsFull)
-            }
-            if len > read.len() {
-                crate::zbail!(@log TransportError::InvalidAttribute)
-            }
-
-            buff_mut[..len].copy_from_slice(&read[2..2 + len]);
-            len
-        } else {
-            let len = read.len();
-            if len > left {
-                crate::zbail!(@log TransportError::TransportIsFull)
-            }
-            buff_mut[..len].copy_from_slice(&read[..len]);
-            len
-        };
-
-        if len != 0 {
-            self.state = State::Used;
-        }
-
-        self.cursor += len;
-
-        Ok(())
+        self.decode_with(|data| {
+            let size = data.len().min(read.len());
+            let (ret, remain) = read.split_at(size);
+            data[..size].copy_from_slice(ret);
+            read = remain;
+            Ok::<_, TransportError>(size)
+        })
     }
 
     pub fn decode_with<E>(
@@ -118,52 +84,22 @@ impl<Buff> TransportRx<Buff> {
             return Ok(());
         }
 
-        let mut read = |bytes: &mut [u8]| -> core::result::Result<usize, TransportError> {
-            read(bytes).map_err(|e| {
-                crate::error!("{e}");
-                TransportError::CouldNotRead
-            })
-        };
+        let max = core::cmp::min(self.buff.as_ref().len(), self.batch_size);
+        let buff = &mut self.buff.as_mut()[self.cursor..max];
 
-        let full_size = core::cmp::min(self.buff.as_ref().len(), self.batch_size);
-        let left = full_size - self.cursor;
-        let buff_mut = &mut self.buff.as_mut()[self.cursor..full_size];
+        let len = super::helper::read_streamed(
+            buff,
+            |bytes: &mut [u8]| -> core::result::Result<usize, TransportError> {
+                read(bytes).map_err(|e| {
+                    crate::error!("{e}");
+                    TransportError::CouldNotRead
+                })
+            },
+            self.streamed,
+        )?
+        .len();
 
-        let len = if self.streamed {
-            if 2 > left {
-                crate::zbail!(@log TransportError::TransportTooSmall);
-            }
-
-            let mut len = [0u8; 2];
-            let l = read(&mut len)?;
-            if l == 0 {
-                return Ok(());
-            } else if l != 2 {
-                crate::zbail!(@log TransportError::InvalidAttribute)
-            }
-
-            let len = u16::from_le_bytes(len) as usize;
-            if len > left {
-                crate::zbail!(@log TransportError::TransportIsFull)
-            }
-
-            if read(&mut buff_mut[..len])? != len {
-                crate::zbail!(@log TransportError::InvalidAttribute)
-            }
-
-            len
-        } else {
-            let len = read(&mut buff_mut[..])?;
-            if len == 0 {
-                return Ok(());
-            }
-            if len > left {
-                crate::zbail!(@log TransportError::TransportIsFull)
-            }
-            len
-        };
-
-        if len != 0 {
+        if len > 0 {
             self.state = State::Used;
         }
 
